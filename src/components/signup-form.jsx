@@ -20,6 +20,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 
 export function SignupForm({ ...props }) {
   const [state, formAction, pending] = useActionState(authenticate, null);
@@ -70,10 +71,9 @@ export function SignupForm({ ...props }) {
             </Field>
             <Field>
               <FieldLabel htmlFor="password">Password</FieldLabel>
-              <Input
+              <PasswordInput
                 id="password"
                 name="password"
-                type="password"
                 autoComplete="new-password"
                 minLength={6}
                 required
@@ -84,10 +84,9 @@ export function SignupForm({ ...props }) {
             </Field>
             <Field>
               <FieldLabel htmlFor="confirm-password">Confirm Password</FieldLabel>
-              <Input
+              <PasswordInput
                 id="confirm-password"
                 name="confirm"
-                type="password"
                 autoComplete="new-password"
                 minLength={6}
                 required

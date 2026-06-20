@@ -38,7 +38,9 @@ The AI is **not the grader**. It sits off to the side with a dashed arrow into t
 
 > **It only gives an opinion. It never makes the final call.**
 
-The AI can *suggest* an answer on a person's-side check ("this filigree looks melted"), or *draft* a golden answer for a person to confirm — but the call that decides pass or fail belongs to **the grader**, and the grader is tied to an answer a person wrote. The AI is a fast helper that points at things; it is never the judge of record.
+The AI can *suggest* an answer on a person's-side check ("this filigree looks melted"), or *draft* a golden answer for a person to confirm — but the call that decides pass or fail belongs to **the grader**, and the grader is tied to an answer a person wrote. The AI is a fast helper that points at things; by default it is never the judge of record.
+
+> **Later extension — opt-in `judge` mode.** The shipped tool adds a per-rubric **grader mode**. In the default `suggest` mode the boundary above holds exactly: the AI only flags, a human decides (`llm_suggested`, verdict pending). A builder can instead opt a fuzzy rubric into `judge` mode, where the AI acts as a *first-pass* grader and records a pass/fail (`llm_judge`) — but this never removes the person from the loop: every AI verdict is overridable, and the human override (`decided_by: 'human'`) remains the final call. Machine rules still decide wherever they exist. So the principle is intact — a person owns the verdict of record — and `judge` mode is a speed-up the builder explicitly turns on, fenced by the same check-the-checker discipline below.
 
 ## The Failure Mode I Accepted
 
@@ -56,5 +58,5 @@ So the person's-side error is fenced in by a warm-up test, not left wide open. I
 ## Deliverable Check
 
 - ✅ The line is drawn — the single question "can a simple rule check it?"
-- ✅ The grader is marked — **THE GRADER** is the circled node in the middle; the AI sits outside it and only suggests.
+- ✅ The grader is marked — **THE GRADER** is the circled node in the middle; the AI sits outside it and only suggests by default (and even in opt-in `judge` mode its verdict is a first pass a human can override).
 - ✅ The accepted failure is named — unavoidable disagreement on the person's side, fenced in by the check-the-checker warm-up test.

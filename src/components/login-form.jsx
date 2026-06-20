@@ -20,6 +20,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { cn } from "@/lib/utils";
 
 export function LoginForm({ className, ...props }) {
@@ -67,10 +68,9 @@ export function LoginForm({ className, ...props }) {
                     Forgot your password?
                   </Link>
                 </div>
-                <Input
+                <PasswordInput
                   id="password"
                   name="password"
-                  type="password"
                   autoComplete="current-password"
                   required
                 />

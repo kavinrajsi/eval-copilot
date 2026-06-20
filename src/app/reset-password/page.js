@@ -14,7 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 
 export default function ResetPasswordPage() {
   const [state, formAction, pending] = useActionState(updatePassword, null);
@@ -38,10 +38,9 @@ export default function ResetPasswordPage() {
               ) : null}
               <Field>
                 <FieldLabel htmlFor="password">New password</FieldLabel>
-                <Input
+                <PasswordInput
                   id="password"
                   name="password"
-                  type="password"
                   autoComplete="new-password"
                   minLength={6}
                   required
@@ -49,10 +48,9 @@ export default function ResetPasswordPage() {
               </Field>
               <Field>
                 <FieldLabel htmlFor="confirm">Confirm new password</FieldLabel>
-                <Input
+                <PasswordInput
                   id="confirm"
                   name="confirm"
-                  type="password"
                   autoComplete="new-password"
                   minLength={6}
                   required

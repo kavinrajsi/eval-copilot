@@ -34,6 +34,7 @@ erDiagram
         uuid owner_id FK
         text rule_text
         jsonb rules
+        text grader_mode
     }
     run {
         uuid id PK
@@ -66,7 +67,12 @@ erDiagram
 | `exact_match` | `{ type }` | trimmed `actual` ≠ trimmed `known_good` |
 | `count_equals` | `{ type, token, value }` | occurrences of `token` ≠ `value` (case-insensitive) |
 
-Rules evaluate in order and the **first failure wins** (`decided_by: 'rule'`). When a rubric has **no** machine rules, the run flow sends each case through the suggest-only AI (`suggestPossibleFailure`): the grade is stored **pending** (`grade.verdict` is `NULL`) with `decided_by: 'llm_suggested'` and a hint note. A person then confirms pass/fail in Results, which sets the verdict and flips `decided_by` to `'human'`. The AI never sets the verdict — `grade.verdict` is nullable precisely to hold this pending state.
+Rules evaluate in order and the **first failure wins** (`decided_by: 'rule'`). When a rubric has **no** machine rules, the case is *fuzzy*, and `rubric.grader_mode` decides how it's graded (both paths use Claude when `ANTHROPIC_API_KEY` is set, else a deterministic heuristic):
+
+- **`suggest`** (default) — `suggestPossibleFailure` stores the grade **pending** (`grade.verdict` is `NULL`) with `decided_by: 'llm_suggested'` and a hint note. The AI does not set the verdict.
+- **`judge`** — `judgeByLLM` scores the case and stores a real `verdict` (`pass`/`fail`) with `decided_by: 'llm_judge'` and a `[confidence] rationale` note. This is the AI acting as a first-pass grader.
+
+Either way a person can confirm or override in Results, which sets/replaces the verdict and flips `decided_by` to `'human'`. `grade.verdict` is nullable precisely to hold the `suggest`-mode pending state, and `grade.decided_by` is one of `rule | human | llm_suggested | llm_judge`. Both `grading.js` functions live in `src/lib/grading.js` (the Anthropic calls themselves in the server-only `src/lib/grading-claude.js`).
 
 ## The Run-to-Run Comparison Keys
 

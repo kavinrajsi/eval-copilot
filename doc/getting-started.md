@@ -22,12 +22,12 @@ After signing in you're on **/dashboard**:
 - **Chart** — pass rate per run over time.
 - **Features table** — each feature with its case count, run count, and latest pass rate. Click a row to open it.
 
-> New here? Open the sample feature **AI SEO Content Generator** (it has two runs, so Compare works) to see a fully populated example before building your own.
+> New here? Every account starts with a sample feature, **Brand Rulebook Checker** — a classifier with five golden cases and a rubric already filled in. Open it to see how a feature is shaped, then do a couple of runs to try **Compare**.
 
 ## Step 2 — Create a feature
 
 1. Click **New feature**.
-2. Enter a **name** (e.g. "SEO Content Generator") and an optional **type** (text / image / classifier).
+2. Enter a **name** (e.g. "Brand Rulebook Classifier") and an optional **type** (e.g. classifier).
 3. The feature appears in the sidebar and table. Open it to reach the 5-tab workspace: **Golden Set · Rubric · Run · Results · Compare**.
 
 ## Step 3 — Build the Golden Set *(before you run anything)*
@@ -54,9 +54,12 @@ In the **Rubric** tab:
    | `exact_match` | output must equal the known-good |
    | `count_equals` | a token must appear exactly N times (e.g. "stone" × 20) |
 
-3. Click **Save rubric**. (Invalid rule shapes are rejected, so you can't save a half-filled rule.)
+3. Pick a **Fuzzy-case grader** (the dropdown below the rules) — it decides how cases with *no* machine rule are handled:
+   - **AI suggests, human decides** — the AI flags a possible issue; the verdict stays pending until a human confirms it.
+   - **AI judges pass/fail** — the AI scores each fuzzy case pass/fail itself; a human can still override it in Results.
+4. Click **Save rubric**. (Invalid rule shapes are rejected, so you can't save a half-filled rule.)
 
-> **No machine rules?** That's fine — those cases become *fuzzy*: the AI **suggests** a possible issue (using Claude if an API key is configured, otherwise a built-in heuristic) and a **human confirms** the verdict. The AI never decides pass/fail.
+> **No machine rules?** That's fine — those cases become *fuzzy* and follow the **Fuzzy-case grader** you picked. Either way the AI uses Claude when `ANTHROPIC_API_KEY` is set (otherwise a built-in heuristic), and a human always has the final say via the override in Results.
 
 ## Step 5 — Run the feature
 
@@ -66,14 +69,15 @@ In the **Run** tab:
 2. Paste your AI feature's **actual output** for each case.
 3. Click **Grade run**. You'll get a summary — **X pass / Y fail / Z needs review** — and a per-case verdict table.
    - With machine rules → each case is graded **by rule** instantly.
-   - Without rules → cases come back **"Needs review"** with an AI hint to confirm.
+   - Without rules, **AI judges pass/fail** mode → each case comes back with a real pass/fail (the AI's first-pass verdict, overridable).
+   - Without rules, **AI suggests** mode → cases come back **"Needs review"** with an AI hint for a human to confirm.
 
 ## Step 6 — Review & confirm (Results)
 
 In the **Results** tab:
 
 1. Pick a run from the dropdown.
-2. Each row shows the verdict, **who decided it** (`rule` / `human` / `llm_suggested`), and a note.
+2. Each row shows the verdict, **who decided it** (`rule` / `llm_judge` / `llm_suggested` / `human`), and a note.
 3. For "Needs review" cases — or any rule call you disagree with — click **Pass** or **Fail** to set the human verdict (it becomes `decided_by: human`).
 4. **Delete run** here if you want to redo it.
 

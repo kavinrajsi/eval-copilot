@@ -135,9 +135,10 @@ NEXT_PUBLIC_SUPABASE_URL=https://<your-project-ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<your-publishable-key>
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
 ANTHROPIC_API_KEY=<optional — enables the LLM suggest/judge graders>
+ANTHROPIC_SUGGEST_MODEL=<optional — grader model; default claude-haiku-4-5, e.g. claude-sonnet-4-5>
 ```
 
-The two Supabase values come from your dashboard → **Project Settings → API**. Use the **publishable** key (not the secret/service-role key). `NEXT_PUBLIC_SITE_URL` is the app's public origin — it builds the password-reset link's redirect target (set it to your deployed URL in production). Add `<NEXT_PUBLIC_SITE_URL>/auth/callback` to **Authentication → URL Configuration → Redirect URLs** so the reset link is accepted. `ANTHROPIC_API_KEY` is **optional** — set it to use Claude for the fuzzy-case graders; without it they fall back to a deterministic heuristic.
+The two Supabase values come from your dashboard → **Project Settings → API**. Use the **publishable** key (not the secret/service-role key). `NEXT_PUBLIC_SITE_URL` is the app's public origin — it builds the password-reset link's redirect target (set it to your deployed URL in production). Add `<NEXT_PUBLIC_SITE_URL>/auth/callback` to **Authentication → URL Configuration → Redirect URLs** so the reset link is accepted. `ANTHROPIC_API_KEY` is **optional** — set it to use Claude for the fuzzy-case graders; without it they fall back to a deterministic heuristic. `ANTHROPIC_SUGGEST_MODEL` is also optional — it picks the grader model (defaults to `claude-haiku-4-5`; set `claude-sonnet-4-5` for sharper judgement).
 
 > If email confirmation is enabled in **Authentication → Providers → Email**, a new sign-up won't get a session until the user confirms via email — the login form will show "Check your email to confirm your account." Disable it for faster local testing.
 

@@ -8,9 +8,9 @@
 | --- | --- | --- |
 | Frontend | Next.js 16 (App Router) + shadcn/ui | `src/app/dashboard/**` |
 | API | Next.js route handlers | `src/app/api/**` |
-| Grading engine | Plain JS (rules + suggest-only AI) | `src/lib/grading.js` |
+| Grading engine | Plain JS rules + AI suggest/judge | `src/lib/grading.js` |
 | Database | Supabase Postgres + RLS | Supabase project (Postgres + RLS) |
-| Auth | Supabase Auth (cookie sessions) | `src/lib/supabase/**`, `src/middleware.js` |
+| Auth | Supabase Auth (cookie sessions) | `src/lib/supabase/**`, `src/proxy.js` |
 
 Screens: **My Features → Golden Set → Rubric → Run → Results → Compare**, all under the auth-guarded `/dashboard`.
 
@@ -51,8 +51,9 @@ Before grading any new case, the tool reproduces verdicts already known to be tr
 | Q6 | Banned word present | graded FAIL by rule | _ |
 | Q7 | Compare run1 vs run2 | shows fail→pass diff | _ |
 | Q8 | Verify-the-verifier set | all known verdicts reproduced | ✅ (`npm run verify`) |
-| Q9 | Run with a rubric that has no machine rules | grades stored pending (`Needs review`) with an `llm_suggested` AI hint | _ |
-| Q10 | Confirm a pending grade in Results | verdict set, `decided_by` → `human` | _ |
+| Q9 | Run with a no-machine-rule rubric in **suggest** mode | grades stored pending (`Needs review`) with an `llm_suggested` AI hint | _ |
+| Q9b | Run with a no-machine-rule rubric in **judge** mode | grades get a real pass/fail with `decided_by` → `llm_judge` and a `[confidence] rationale` note | _ |
+| Q10 | Confirm/override a grade in Results | verdict set, `decided_by` → `human` | _ |
 | Q11 | Save rubric with an invalid rule shape | rejected (400) | _ |
 | Q12 | Delete a golden case / run | row and its grades removed | _ |
 
@@ -88,7 +89,7 @@ Row Level Security isolates every builder's data per user — see [domain-model.
 
 - [x] Auth (login) working
 - [x] API: features / cases / rubric / runs / compare / grades
-- [x] Grading engine (rules + AI-suggest-only)
+- [x] Grading engine (rules + AI suggest/judge)
 - [x] Frontend through Results + Compare
 - [x] Verify-the-verifier passes (`npm run verify`)
 - [ ] Two real builders run it (one cold) → before/change/after captured
