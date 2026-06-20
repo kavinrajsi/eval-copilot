@@ -1,0 +1,548 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+
+const RULE_TYPES = [
+  "max_length",
+  "min_length",
+  "must_not_contain",
+  "must_contain",
+  "exact_match",
+  "count_equals",
+];
+
+function Verdict({ value }) {
+  if (!value) return <span className="text-muted-foreground">—</span>;
+  return (
+    <Badge variant={value === "pass" ? "secondary" : "destructive"}>
+      {value.toUpperCase()}
+    </Badge>
+  );
+}
+
+export default function FeatureWorkspace({ featureId }) {
+  const [cases, setCases] = useState([]);
+  const [rubric, setRubric] = useState(null);
+  const [runs, setRuns] = useState([]);
+
+  const base = `/api/features/${featureId}`;
+
+  const loadAll = useCallback(async () => {
+    const [c, r, ru] = await Promise.all([
+      fetch(`${base}/golden-cases`).then((x) => x.json()),
+      fetch(`${base}/rubric`).then((x) => x.json()),
+      fetch(`${base}/runs`).then((x) => x.json()),
+    ]);
+    setCases(c.golden_cases ?? []);
+    setRubric(r.rubric ?? null);
+    setRuns(ru.runs ?? []);
+  }, [base]);
+
+  useEffect(() => {
+    // Load the feature's data once on mount; loadAll setStates after fetch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadAll();
+  }, [loadAll]);
+
+  return (
+    <Tabs defaultValue="golden">
+      <TabsList className="mb-4 flex-wrap">
+        <TabsTrigger value="golden">Golden Set</TabsTrigger>
+        <TabsTrigger value="rubric">Rubric</TabsTrigger>
+        <TabsTrigger value="run">Run</TabsTrigger>
+        <TabsTrigger value="results">Results</TabsTrigger>
+        <TabsTrigger value="compare">Compare</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="golden">
+        <GoldenSet base={base} cases={cases} onChange={loadAll} />
+      </TabsContent>
+      <TabsContent value="rubric">
+        <Rubric key={rubric?.id ?? "new"} base={base} rubric={rubric} onChange={loadAll} />
+      </TabsContent>
+      <TabsContent value="run">
+        <RunPanel base={base} cases={cases} onRun={loadAll} />
+      </TabsContent>
+      <TabsContent value="results">
+        <Results runs={runs} onChange={loadAll} />
+      </TabsContent>
+      <TabsContent value="compare">
+        <Compare base={base} runs={runs} />
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+// --- Golden Set -----------------------------------------------------------
+
+function GoldenSet({ base, cases, onChange }) {
+  const [input, setInput] = useState("");
+  const [knownGood, setKnownGood] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function add(e) {
+    e.preventDefault();
+    setBusy(true);
+    await fetch(`${base}/golden-cases`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input, known_good: knownGood }),
+    });
+    setBusy(false);
+    setInput("");
+    setKnownGood("");
+    onChange();
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Golden Set</CardTitle>
+        <CardDescription>
+          The answer key — write the known-good output <em>before</em> you run.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-6">
+        <form onSubmit={add} className="grid gap-3">
+          <div className="grid gap-2">
+            <Label>Input / brief</Label>
+            <Textarea value={input} onChange={(e) => setInput(e.target.value)} required />
+          </div>
+          <div className="grid gap-2">
+            <Label>Known-good answer</Label>
+            <Textarea value={knownGood} onChange={(e) => setKnownGood(e.target.value)} required />
+          </div>
+          <Button type="submit" disabled={busy || !input || !knownGood} className="justify-self-start">
+            {busy ? "Adding…" : "Add case"}
+          </Button>
+        </form>
+
+        {cases.length ? (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Input</TableHead>
+                <TableHead>Known-good</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {cases.map((c) => (
+                <TableRow key={c.id}>
+                  <TableCell className="align-top">{c.input}</TableCell>
+                  <TableCell className="align-top">{c.known_good}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <p className="text-muted-foreground text-sm">No cases yet.</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- Rubric ---------------------------------------------------------------
+
+// Keyed on rubric id by the parent, so initial state is taken from the prop
+// once it loads — no prop->state sync effect needed.
+function Rubric({ base, rubric, onChange }) {
+  const [ruleText, setRuleText] = useState(rubric?.rule_text ?? "");
+  const [rules, setRules] = useState(rubric?.rules ?? []);
+  const [type, setType] = useState("max_length");
+  const [value, setValue] = useState("");
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  function addRule() {
+    const rule = { type };
+    if (type === "max_length" || type === "min_length" || type === "count_equals") {
+      rule.value = Number(value);
+    }
+    if (type === "must_contain" || type === "must_not_contain") rule.value = value;
+    if (type === "count_equals") rule.token = token;
+    setRules((prev) => [...prev, rule]);
+    setValue("");
+    setToken("");
+  }
+
+  async function save() {
+    setBusy(true);
+    await fetch(`${base}/rubric`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rule_text: ruleText, rules }),
+    });
+    setBusy(false);
+    onChange();
+  }
+
+  const needsValue = type !== "exact_match";
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Rubric</CardTitle>
+        <CardDescription>
+          Plain-English rule plus the machine checks the computer runs.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-6">
+        <div className="grid gap-2">
+          <Label>Rule (plain English)</Label>
+          <Textarea
+            value={ruleText}
+            onChange={(e) => setRuleText(e.target.value)}
+            placeholder="Meta title ≤ 60 chars, no invented certifications."
+          />
+        </div>
+
+        <div className="grid gap-3">
+          <Label>Machine rules</Label>
+          <div className="flex flex-wrap items-end gap-2">
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+            >
+              {RULE_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+            {type === "count_equals" ? (
+              <Input
+                placeholder="token (e.g. stone)"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                className="w-40"
+              />
+            ) : null}
+            {needsValue ? (
+              <Input
+                placeholder="value"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                className="w-40"
+              />
+            ) : null}
+            <Button type="button" variant="secondary" onClick={addRule}>
+              Add rule
+            </Button>
+          </div>
+
+          {rules.length ? (
+            <ul className="grid gap-1">
+              {rules.map((r, i) => (
+                <li key={i} className="flex items-center justify-between rounded border px-3 py-2 text-sm">
+                  <code>{JSON.stringify(r)}</code>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setRules((p) => p.filter((_, j) => j !== i))}
+                  >
+                    Remove
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted-foreground text-sm">
+              No machine rules yet — without them, every case falls to a human.
+            </p>
+          )}
+        </div>
+
+        <Button onClick={save} disabled={busy || !ruleText.trim()} className="justify-self-start">
+          {busy ? "Saving…" : "Save rubric"}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- Run ------------------------------------------------------------------
+
+function RunPanel({ base, cases, onRun }) {
+  const [label, setLabel] = useState("");
+  const [outputs, setOutputs] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+
+  async function run(e) {
+    e.preventDefault();
+    setBusy(true);
+    const payload = {
+      label,
+      outputs: cases.map((c) => ({
+        golden_case_id: c.id,
+        actual_output: outputs[c.id] ?? "",
+      })),
+    };
+    const res = await fetch(`${base}/runs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json();
+    setBusy(false);
+    setResult(body);
+    onRun();
+  }
+
+  if (!cases.length) {
+    return (
+      <Card>
+        <CardContent className="text-muted-foreground py-8 text-sm">
+          Add golden cases first, then run your feature against them here.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Run</CardTitle>
+        <CardDescription>Paste the feature&apos;s actual output for each case, then grade.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={run} className="grid gap-4">
+          <div className="grid gap-2">
+            <Label>Run label</Label>
+            <Input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="v1 — before fix"
+            />
+          </div>
+          {cases.map((c) => (
+            <div key={c.id} className="grid gap-2">
+              <Label className="text-muted-foreground text-xs">{c.input}</Label>
+              <Textarea
+                value={outputs[c.id] ?? ""}
+                onChange={(e) => setOutputs((p) => ({ ...p, [c.id]: e.target.value }))}
+                placeholder="actual output…"
+              />
+            </div>
+          ))}
+          <Button type="submit" disabled={busy} className="justify-self-start">
+            {busy ? "Grading…" : "Grade run"}
+          </Button>
+        </form>
+
+        {result?.summary ? (
+          <div className="mt-6 grid gap-2">
+            <p className="text-sm font-medium">
+              {result.summary.pass} pass / {result.summary.fail} fail of {result.summary.total}
+            </p>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Verdict</TableHead>
+                  <TableHead>By</TableHead>
+                  <TableHead>Note</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {result.grades.map((g) => (
+                  <TableRow key={g.golden_case_id}>
+                    <TableCell><Verdict value={g.verdict} /></TableCell>
+                    <TableCell className="text-muted-foreground text-xs">{g.decided_by}</TableCell>
+                    <TableCell className="text-sm">{g.note ?? "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- Results --------------------------------------------------------------
+
+function Results({ runs }) {
+  const [runId, setRunId] = useState("");
+  const [grades, setGrades] = useState([]);
+
+  useEffect(() => {
+    if (!runId) return;
+    fetch(`/api/runs/${runId}/grades`)
+      .then((x) => x.json())
+      .then((b) => setGrades(b.grades ?? []));
+  }, [runId]);
+
+  async function override(id, verdict) {
+    await fetch(`/api/grades/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ verdict, note: "human override" }),
+    });
+    setGrades((prev) =>
+      prev.map((g) => (g.id === id ? { ...g, verdict, decided_by: "human" } : g)),
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Results</CardTitle>
+        <CardDescription>Per-case verdicts. A human can override the fuzzy ones.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <select
+          value={runId}
+          onChange={(e) => setRunId(e.target.value)}
+          className="border-input bg-background h-9 w-full max-w-sm rounded-md border px-3 text-sm"
+        >
+          <option value="">Pick a run…</option>
+          {runs.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.label || r.id.slice(0, 8)}
+            </option>
+          ))}
+        </select>
+
+        {grades.length ? (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Input</TableHead>
+                <TableHead>Verdict</TableHead>
+                <TableHead>By</TableHead>
+                <TableHead>Note</TableHead>
+                <TableHead className="text-right">Override</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {grades.map((g) => (
+                <TableRow key={g.id}>
+                  <TableCell className="max-w-[16rem] align-top text-xs">{g.golden_case?.input}</TableCell>
+                  <TableCell className="align-top"><Verdict value={g.verdict} /></TableCell>
+                  <TableCell className="text-muted-foreground align-top text-xs">{g.decided_by}</TableCell>
+                  <TableCell className="align-top text-sm">{g.note ?? "—"}</TableCell>
+                  <TableCell className="space-x-1 text-right align-top">
+                    <Button size="sm" variant="ghost" onClick={() => override(g.id, "pass")}>
+                      Pass
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => override(g.id, "fail")}>
+                      Fail
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- Compare --------------------------------------------------------------
+
+function Compare({ base, runs }) {
+  const [run1, setRun1] = useState("");
+  const [run2, setRun2] = useState("");
+  const [diff, setDiff] = useState(null);
+
+  async function compare() {
+    const res = await fetch(`${base}/compare?run1=${run1}&run2=${run2}`);
+    setDiff(await res.json());
+  }
+
+  const changeColor = {
+    fixed: "secondary",
+    broke: "destructive",
+    same: "outline",
+    changed: "outline",
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Compare</CardTitle>
+        <CardDescription>Line up two runs case-by-case: what got fixed, what broke.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <div className="flex flex-wrap items-end gap-2">
+          <RunSelect label="Run 1" runs={runs} value={run1} onChange={setRun1} />
+          <RunSelect label="Run 2" runs={runs} value={run2} onChange={setRun2} />
+          <Button onClick={compare} disabled={!run1 || !run2 || run1 === run2}>
+            Compare
+          </Button>
+        </div>
+
+        {diff?.summary ? (
+          <>
+            <p className="text-sm font-medium">
+              {diff.summary.fixed} fixed · {diff.summary.broke} broke · {diff.summary.same} unchanged
+            </p>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Input</TableHead>
+                  <TableHead>Run 1</TableHead>
+                  <TableHead>Run 2</TableHead>
+                  <TableHead>Change</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {diff.cases.map((c) => (
+                  <TableRow key={c.golden_case_id}>
+                    <TableCell className="max-w-[16rem] align-top text-xs">{c.input}</TableCell>
+                    <TableCell className="align-top"><Verdict value={c.run1} /></TableCell>
+                    <TableCell className="align-top"><Verdict value={c.run2} /></TableCell>
+                    <TableCell className="align-top">
+                      <Badge variant={changeColor[c.change]}>{c.change}</Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function RunSelect({ label, runs, value, onChange }) {
+  return (
+    <div className="grid gap-1">
+      <Label className="text-xs">{label}</Label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+      >
+        <option value="">Pick…</option>
+        {runs.map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.label || r.id.slice(0, 8)}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}

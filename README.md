@@ -48,14 +48,14 @@ Track B walks the shared five-move spine. Each move ends in a deliverable.
 | **1. Be the eval yourself, on two real apps**                      | Sit with 2 builders, force 5 known-good cases into existence, run their feature, grade by hand.                                                    | The raw record + whether they had any answer key before you sat down. → [doc/](doc/)         |
 | **2. Write down your bet, before you build**                       | Claim + 3 numbers + kill-number, as your first timestamped commit.                                                                                 | The timestamped hypothesis. → [doc/hypothesis.md](./doc/hypothesis.md)                       |
 | **3. Decide what the computer checks, and what only a person can** | Draw the line between what a simple rule can check and what needs judgement; mark who makes the final call.                                        | The diagram + the failure you accepted. → [doc/who-checks-what.md](./doc/who-checks-what.md) |
-| **4. Draw the domain model**                                       | Hand-draw the schema (feature → golden cases → rubric → run → grade), mark the run-to-run comparison keys, add row-level security + two-user test. | Hand-drawn schema + proof the two-user test passes.                                          |
-| **5. Put it in front of two people, report what really happened**  | Two builders run their own feature through the tool (one cold); capture before-run → change → after-run.                                           | The before/after evidence + the surprise.                                                    |
+| **4. Draw the domain model**                                       | Hand-draw the schema (feature → golden cases → rubric → run → grade), mark the run-to-run comparison keys, add row-level security. | Schema + ownership walls. → [doc/domain-model.md](./doc/domain-model.md)                 |
+| **5. Put it in front of two people, report what really happened**  | Two builders run their own feature through the tool (one cold); capture before-run → change → after-run.                                           | Before/after evidence + the surprise. → [doc/move-5-testing.md](./doc/move-5-testing.md)     |
 
 > **Who verifies the verifier?** The builder does — against cases they already have a verdict on. Before the rubric is trusted on an unseen case, it must flag the outputs already known to be bad and pass the ones already known to be fine.
 
 ## The application
 
-The app is the plumbing the five moves run on. It is a **Next.js 16** application with multi-user authentication already wired up — the foundation for **Move 4**, where every builder's golden sets, rubrics, and runs must be isolated per user (row-level security + a two-user test).
+The app is the plumbing the five moves run on. It is a **Next.js 16** application with multi-user authentication already wired up — the foundation for **Move 4**, where every builder's golden sets, rubrics, and runs must be isolated per user (row-level security).
 
 What's built today:
 
@@ -123,13 +123,14 @@ Both values come from your Supabase dashboard → **Project Settings → API**. 
 ### 3. Run
 
 ```bash
-npm run dev      # start the dev server at http://localhost:3000
-npm run build    # production build
-npm run start    # serve the production build
-npm run lint     # eslint
+npm run dev            # start the dev server at http://localhost:3000
+npm run build          # production build
+npm run start          # serve the production build
+npm run lint           # eslint
+npm run verify         # verify-the-verifier: grader reproduces known Move 1 verdicts
 ```
 
-Visit `http://localhost:3000/dashboard` → you'll be redirected to `/login`. Create an account, sign in, and you'll land on the dashboard.
+Visit `http://localhost:3000/dashboard` → you'll be redirected to `/login`. Create an account, sign in, then: **create a feature → add golden cases → write a rubric → run → see results → compare two runs.**
 
 ## Repository structure
 
@@ -143,32 +144,36 @@ Visit `http://localhost:3000/dashboard` → you'll be redirected to `/login`. Cr
 ├── eslint.config.mjs           ESLint 9 flat config
 ├── postcss.config.mjs          Tailwind v4 PostCSS plugin
 ├── package.json
-├── doc/                        Hackathon evidence (Moves 1–3)
+├── doc/                        Hackathon evidence (Moves 1–5)
 │   ├── hypothesis.md             Move 2 — the timestamped bet
 │   ├── who-checks-what.md        Move 3 — computer checks vs. human judgement
+│   ├── domain-model.md           Move 4 — schema, comparison keys, ownership walls
+│   ├── move-5-testing.md         Move 5 — build, test matrices, dummy example
 │   ├── summary.md                Executive summary across all evaluations
 │   └── user-1.md … user-4.md     Move 1 — per-builder eval records
+├── scripts/
+│   └── verify-grading.mjs       Verify-the-verifier (npm run verify)
 ├── public/                     Static assets
 └── src/
     ├── app/
     │   ├── layout.js             Root layout (Geist fonts, TooltipProvider)
     │   ├── page.js               Home page
     │   ├── globals.css           Tailwind v4 import + theme tokens (light/dark)
-    │   ├── login/
-    │   │   ├── page.js           Sign-in / sign-up form
-    │   │   └── actions.js        authenticate() + signout() server actions
-    │   └── dashboard/
-    │       └── page.js           Protected route
-    ├── middleware.js             Runs session refresh + route guards
+    │   ├── login/                Sign-in / sign-up form + server actions
+    │   ├── dashboard/
+    │   │   ├── page.js           My Features (list + create)
+    │   │   ├── new-feature-form.jsx
+    │   │   └── [featureId]/      Golden Set / Rubric / Run / Results / Compare
+    │   └── api/                  Route handlers: features, golden-cases,
+    │       │                       rubric, runs, grades, compare
+    ├── middleware.js             Session refresh + route guards
     ├── components/ui/            55 shadcn/ui components
-    ├── hooks/
-    │   └── use-mobile.js         useIsMobile() viewport hook
+    ├── hooks/use-mobile.js
     └── lib/
         ├── utils.js              cn() class-merge helper
-        └── supabase/
-            ├── client.js         Browser client (createBrowserClient)
-            ├── server.js         Server client (cookie-based)
-            └── middleware.js     updateSession() + redirect rules
+        ├── grading.js            The grading engine (rules + suggest-only AI)
+        ├── api.js                requireUser() + JSON helpers for routes
+        └── supabase/             Browser / server / middleware clients
 ```
 
 ## The track
