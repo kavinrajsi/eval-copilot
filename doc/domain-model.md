@@ -6,54 +6,6 @@
 
 [![Domain model: FEATURE → GOLDEN CASE / RUBRIC / RUN, and a GRADE keyed by golden_case_id + run_id](https://mermaid.ink/img/pako:eNp9UstOwzAQ_JVoubolbcijBiGVpI2QoEiBXsCoMrHTRk3iynF4lf47TtIHRYI97czseObgNcSCccCQZOItXlCpjIeAFIae8ROB8Wj4MI1GBJ5bLvQ1Gd7dBKOJ4Q_vD0Kk-Wh6FV37B2o6acjJwV2bo2EwuniRp5dzkTFezGJa8lnKGkpWxW595ZKlsWq920JGp3OpK_xE0RHQWduaNf4icJxB4MsI9-W2J23mTmrVOKNlGfDEWGU0LYwkzTJ8kjSDSiXFkuMTsxkUi0zIHTr_ZV_yj3_NLey8pUwtsLV6__s1Y4xCH0Wo7t2UOhLDOkkzgGAuUwZYyYojyLnMaQ1hXV8TUAuecwJYr4zKJQFSbLRnRYtHIfKdTYpqvgCc0KzUqFoxqniQ0rmk-Z6VvGBc-qIqFOCzfvMG4DW8A-55brdvmZZnOZY3sAe2jeBD05bbdU23bzqu5zi22fM2CD6bWLNrn_UGptMf1LLnei4CzlIl5G37OZs_uvkGDibLqg?type=png)](https://mermaid.live/edit#pako:eNp9Ul1PwjAU_SvL9bXgYO6rGhPcYDFRTKa8aI2pawcLYyVdpyDy3-02EDHR-9Rzzj33nIduIBGMA4Y0F-_JjEplPISkMPSMngiMhoOHSTwk8NxyUaDJ6O4mHI6NYHB_EGLNx5Or-Do4UJNxQ44P7tocD8Lhxas8vZyKnPHiJaElf8lYQ8mq2D_fuGRZolrvrpDR6VzqCj9RfAR01q5mjT8JHGcQ-DSi73K7lTZzL7VqktOyDHlqLHOaFUaa5Tk-SZtBpZJizvGJ2QxKRC7kHp3_ss_5-l9zCzvvGVMzbC1Xf18zRigKUIzq3k2pIzGqkzQDCKYyY4CVrDiCBZcLWkPY1NsE1IwvOAGsn4zKOQFSbLVnSYtHIRaAU5qX2idFNZ19o2rJqOJhRqeS_tjhBeMyEFWhAFtecwTwBlaAe57b7Vum5VmO5fm2b9sI1pq23K5run3TcT3Hsc2et0Xw0eSaXfus55tO369lz_VcBJxlSsjb9nc2n3T7Bdziy_o)
 
-```mermaid
-erDiagram
-    auth_users ||--o{ feature      : owns
-    feature    ||--o{ golden_case  : has
-    feature    ||--o{ rubric       : has
-    feature    ||--o{ run          : has
-    run        ||--o{ grade        : produces
-    golden_case ||--o{ grade       : graded_as
-
-    feature {
-        uuid id PK
-        uuid owner_id FK
-        text name
-        text feature_type
-    }
-    golden_case {
-        uuid id PK
-        uuid feature_id FK
-        uuid owner_id FK
-        text input
-        text known_good
-    }
-    rubric {
-        uuid id PK
-        uuid feature_id FK
-        uuid owner_id FK
-        text rule_text
-        jsonb rules
-        text grader_mode
-    }
-    run {
-        uuid id PK
-        uuid feature_id FK
-        uuid owner_id FK
-        text label
-    }
-    grade {
-        uuid id PK
-        uuid run_id FK
-        uuid golden_case_id FK
-        uuid owner_id FK
-        text actual_output
-        text verdict
-        text decided_by
-        text note
-    }
-```
-
 ## The Rubric Rule Vocabulary
 
 `rubric.rules` is a jsonb array of machine-checkable rule objects. The grading engine (`src/lib/grading.js`) supports six types:
