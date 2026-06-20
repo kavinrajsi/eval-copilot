@@ -21,38 +21,59 @@ export default async function DashboardPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // RLS-scoped reads; aggregate in JS.
-  const [{ data: features }, { data: cases }, { data: runs }, { data: grades }] =
-    await Promise.all([
-      supabase
-        .from("feature")
-        .select("id, name, feature_type, created_at")
-        .order("created_at", { ascending: false }),
-      supabase.from("golden_case").select("feature_id"),
-      supabase
-        .from("run")
-        .select("id, feature_id, label, created_at")
-        .order("created_at", { ascending: true }),
-      supabase.from("grade").select("run_id, verdict"),
-    ]);
+  // RLS-scoped reads. Only feature/run ROWS are fetched (small); case and grade
+  // tallies use count queries so a feature with thousands of rows isn't pulled.
+  const [{ data: features }, { data: runs }] = await Promise.all([
+    supabase
+      .from("feature")
+      .select("id, name, feature_type, created_at")
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("run")
+      .select("id, feature_id, label, created_at")
+      .order("created_at", { ascending: true }),
+  ]);
 
   const featureList = features ?? [];
-  const caseList = cases ?? [];
   const runList = runs ?? [];
-  const gradeList = grades ?? [];
 
-  // grades grouped by run
-  const byRun = new Map();
-  for (const g of gradeList) {
-    const r = byRun.get(g.run_id) ?? { pass: 0, total: 0 };
-    r.total += 1;
-    if (g.verdict === "pass") r.pass += 1;
-    byRun.set(g.run_id, r);
-  }
+  // Per-feature golden-case counts (count only, no rows).
+  const caseCountEntries = await Promise.all(
+    featureList.map(async (f) => {
+      const { count } = await supabase
+        .from("golden_case")
+        .select("id", { count: "exact", head: true })
+        .eq("feature_id", f.id);
+      return [f.id, count ?? 0];
+    }),
+  );
+  const casesByFeature = new Map(caseCountEntries);
+  const totalCases = [...casesByFeature.values()].reduce((a, b) => a + b, 0);
+
+  // Per-run pass/total counts (two count queries each, no rows).
+  const runStatEntries = await Promise.all(
+    runList.map(async (r) => {
+      const [{ count: total }, { count: pass }] = await Promise.all([
+        supabase.from("grade").select("id", { count: "exact", head: true }).eq("run_id", r.id),
+        supabase
+          .from("grade")
+          .select("id", { count: "exact", head: true })
+          .eq("run_id", r.id)
+          .eq("verdict", "pass"),
+      ]);
+      return [r.id, { pass: pass ?? 0, total: total ?? 0 }];
+    }),
+  );
+  const byRun = new Map(runStatEntries);
 
   // KPIs
-  const totalPass = gradeList.filter((g) => g.verdict === "pass").length;
-  const passRate = rate(totalPass, gradeList.length) ?? 0;
+  let totalPass = 0;
+  let totalGrades = 0;
+  for (const { pass, total } of byRun.values()) {
+    totalPass += pass;
+    totalGrades += total;
+  }
+  const passRate = rate(totalPass, totalGrades) ?? 0;
 
   // Chart: pass rate per run, oldest → newest
   const chartData = runList.map((r) => {
@@ -66,10 +87,6 @@ export default async function DashboardPage() {
   });
 
   // Table rows: per-feature counts + latest-run pass rate
-  const casesByFeature = new Map();
-  for (const c of caseList) {
-    casesByFeature.set(c.feature_id, (casesByFeature.get(c.feature_id) ?? 0) + 1);
-  }
   const runsByFeature = new Map();
   for (const r of runList) {
     const arr = runsByFeature.get(r.feature_id) ?? [];
@@ -106,7 +123,7 @@ export default async function DashboardPage() {
         <div data-tour="kpis">
           <SectionCards
             totalFeatures={featureList.length}
-            totalCases={caseList.length}
+            totalCases={totalCases}
             totalRuns={runList.length}
             passRate={passRate}
           />
