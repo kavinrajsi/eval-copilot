@@ -88,10 +88,10 @@ export default function Home() {
                 Grade my feature
               </Link>
               <Link
-                href="/login"
+                href="#evidence"
                 className={buttonVariants({ variant: "outline", size: "lg" })}
               >
-                Sign in
+                See the evidence
               </Link>
             </div>
           </div>
@@ -115,7 +115,7 @@ export default function Home() {
         </section>
 
         {/* real evidence */}
-        <section className="py-16 lg:py-24">
+        <section id="evidence" className="scroll-mt-20 py-16 lg:py-24">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <h2 className="max-w-xl text-2xl font-semibold tracking-tight text-balance">
               We graded four shipping features by hand. Every failure below would

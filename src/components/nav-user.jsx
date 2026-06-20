@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronsUpDownIcon, LogOutIcon } from "lucide-react";
+import { toast } from "sonner";
 
 import { signout } from "@/app/login/actions";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -57,7 +58,14 @@ export function NavUser({ user }) {
               </DropdownMenuLabel>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onClick={() => signout()}>
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() =>
+                signout().catch(() =>
+                  toast.error("Couldn't sign out. Please try again."),
+                )
+              }
+            >
               <LogOutIcon />
               Sign out
             </DropdownMenuItem>

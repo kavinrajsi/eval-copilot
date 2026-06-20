@@ -6,7 +6,7 @@ import { FeaturesTable } from "@/components/features-table";
 import { SectionCards } from "@/components/section-cards";
 import { SiteHeader } from "@/components/site-header";
 import { Walkthrough } from "@/components/walkthrough";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/server";
 import { dashboardTour } from "@/lib/tours";
 
@@ -94,9 +94,13 @@ export default async function DashboardPage() {
     <>
       <SiteHeader title="Dashboard">
         <Walkthrough steps={dashboardTour} storageKey="ec-tour-dashboard-v1" />
-        <Button data-tour="new-feature" render={<Link href="/dashboard/new" />}>
+        <Link
+          href="/dashboard/new"
+          data-tour="new-feature"
+          className={buttonVariants()}
+        >
           New feature
-        </Button>
+        </Link>
       </SiteHeader>
       <div className="flex flex-col gap-6 p-4 md:p-6">
         <div data-tour="kpis">

@@ -28,6 +28,7 @@ export function GradedSpecimen() {
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
     if (reduce) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setGraded(true);
       return;
     }

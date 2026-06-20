@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -59,7 +59,7 @@ export default function NewFeatureForm() {
               id="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="SEO Content Generator"
+              placeholder="Brand Rulebook Classifier"
               required
             />
           </div>
@@ -69,16 +69,19 @@ export default function NewFeatureForm() {
               id="type"
               value={type}
               onChange={(e) => setType(e.target.value)}
-              placeholder="text / image / classifier"
+              placeholder="classifier"
             />
           </div>
           <div className="flex gap-2">
             <Button type="submit" disabled={busy || !name.trim()}>
               {busy ? "Creating…" : "Create feature"}
             </Button>
-            <Button type="button" variant="ghost" render={<Link href="/dashboard" />}>
+            <Link
+              href="/dashboard"
+              className={buttonVariants({ variant: "ghost" })}
+            >
               Cancel
-            </Button>
+            </Link>
           </div>
         </form>
       </CardContent>

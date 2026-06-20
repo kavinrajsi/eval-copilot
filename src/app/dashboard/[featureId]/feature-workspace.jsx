@@ -158,11 +158,21 @@ function GoldenSet({ base, cases, onChange }) {
         <form onSubmit={add} className="grid gap-3">
           <div className="grid gap-2">
             <Label>Input / brief</Label>
-            <Textarea value={input} onChange={(e) => setInput(e.target.value)} required />
+            <Textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Off-brand colour used (pink instead of brand teal)"
+              required
+            />
           </div>
           <div className="grid gap-2">
             <Label>Known-good answer</Label>
-            <Textarea value={knownGood} onChange={(e) => setKnownGood(e.target.value)} required />
+            <Textarea
+              value={knownGood}
+              onChange={(e) => setKnownGood(e.target.value)}
+              placeholder="FAIL — colour violation"
+              required
+            />
           </div>
           <Button type="submit" disabled={busy || !input || !knownGood} className="justify-self-start">
             {busy ? "Adding…" : "Add case"}
@@ -262,7 +272,7 @@ function Rubric({ base, rubric, onChange }) {
           <Textarea
             value={ruleText}
             onChange={(e) => setRuleText(e.target.value)}
-            placeholder="Meta title ≤ 60 chars, no invented certifications."
+            placeholder="Asset must use the approved logo, brand colours, and fonts. Flag any off-brand colour or a logo below minimum size as FAIL."
           />
         </div>
 
@@ -281,7 +291,7 @@ function Rubric({ base, rubric, onChange }) {
             </NativeSelect>
             {type === "count_equals" ? (
               <Input
-                placeholder="token (e.g. stone)"
+                placeholder="token (e.g. violation)"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
                 className="w-40"
@@ -428,7 +438,7 @@ function RunPanel({ base, cases, rubric, onRun }) {
               <Textarea
                 value={outputs[c.id] ?? ""}
                 onChange={(e) => setOutputs((p) => ({ ...p, [c.id]: e.target.value }))}
-                placeholder="actual output…"
+                placeholder="e.g. PASS — all brand elements within guideline"
               />
             </div>
           ))}
