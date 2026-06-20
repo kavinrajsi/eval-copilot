@@ -13,6 +13,7 @@ import {
   NativeSelectOption,
 } from "@/components/ui/native-select";
 import { isMachineCheckable } from "@/lib/grading";
+import { parseCsv } from "@/lib/csv";
 import {
   Table,
   TableBody,
@@ -180,10 +181,37 @@ function Knowledge({ base, feature, onChange }) {
 
 // --- Golden Set -----------------------------------------------------------
 
-function GoldenSet({ base, cases, onChange }) {
+const GOLDEN_PAGE = 50;
+
+function GoldenSet({ base, onChange }) {
   const [input, setInput] = useState("");
   const [knownGood, setKnownGood] = useState("");
   const [busy, setBusy] = useState(false);
+  const [page, setPage] = useState(0);
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+
+  const loadPage = useCallback(async () => {
+    try {
+      const b = await jsonFetch(
+        `${base}/golden-cases?limit=${GOLDEN_PAGE}&offset=${page * GOLDEN_PAGE}`,
+      );
+      setRows(b.golden_cases ?? []);
+      setTotal(b.total ?? 0);
+    } catch (e) {
+      toast.error(`Couldn't load cases: ${e.message}`);
+    }
+  }, [base, page]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadPage();
+  }, [loadPage]);
+
+  async function refresh() {
+    await loadPage();
+    onChange?.();
+  }
 
   async function add(e) {
     e.preventDefault();
@@ -196,7 +224,8 @@ function GoldenSet({ base, cases, onChange }) {
       });
       setInput("");
       setKnownGood("");
-      onChange();
+      setPage(0);
+      await refresh();
     } catch (err) {
       toast.error(`Couldn't add case: ${err.message}`);
     } finally {
@@ -207,11 +236,66 @@ function GoldenSet({ base, cases, onChange }) {
   async function remove(caseId) {
     try {
       await jsonFetch(`${base}/golden-cases/${caseId}`, { method: "DELETE" });
-      onChange();
+      await refresh();
     } catch (err) {
       toast.error(`Couldn't delete case: ${err.message}`);
     }
   }
+
+  async function onImport(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy(true);
+    try {
+      const text = await file.text();
+      let cases = [];
+      if (file.name.toLowerCase().endsWith(".json")) {
+        const arr = JSON.parse(text);
+        cases = (Array.isArray(arr) ? arr : []).map((c) => ({
+          input: c.input,
+          known_good: c.known_good,
+        }));
+      } else {
+        const parsed = parseCsv(text);
+        if (!parsed.length) throw new Error("empty file");
+        const header = parsed[0].map((h) => h.trim().toLowerCase());
+        const iIn = header.indexOf("input");
+        const iKg = header.indexOf("known_good");
+        if (iIn < 0 || iKg < 0) throw new Error("CSV needs 'input' and 'known_good' headers");
+        cases = parsed.slice(1).map((r) => ({ input: r[iIn], known_good: r[iKg] }));
+      }
+      cases = cases.filter((c) => c.input?.trim() && c.known_good?.trim());
+      if (!cases.length) throw new Error("no valid rows (need input + known_good)");
+
+      let inserted = 0;
+      for (let k = 0; k < cases.length; k += 500) {
+        const r = await jsonFetch(`${base}/golden-cases`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cases: cases.slice(k, k + 500) }),
+        });
+        inserted += r.inserted ?? r.golden_cases?.length ?? 0;
+      }
+      toast.success(`Imported ${inserted} case${inserted === 1 ? "" : "s"}`);
+      setPage(0);
+      await refresh();
+    } catch (err) {
+      toast.error(`Import failed: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function exportAs(format) {
+    const a = document.createElement("a");
+    a.href = `${base}/golden-cases/export?format=${format}`;
+    a.click();
+  }
+
+  const start = total ? page * GOLDEN_PAGE + 1 : 0;
+  const end = Math.min(total, (page + 1) * GOLDEN_PAGE);
+  const maxPage = Math.max(0, Math.ceil(total / GOLDEN_PAGE) - 1);
 
   return (
     <Card>
@@ -222,6 +306,29 @@ function GoldenSet({ base, cases, onChange }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <Label htmlFor="gc-import" className="text-xs">Import CSV/JSON</Label>
+          <Input
+            id="gc-import"
+            type="file"
+            accept=".csv,.json"
+            onChange={onImport}
+            disabled={busy}
+            className="w-64"
+          />
+          <Button type="button" variant="outline" size="sm" onClick={() => exportAs("csv")}>
+            Export CSV
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => exportAs("json")}>
+            Export JSON
+          </Button>
+          <span className="text-muted-foreground ml-auto text-xs">{total} cases</span>
+        </div>
+        <p className="text-muted-foreground text-xs">
+          CSV needs <code>input</code> and <code>known_good</code> columns; JSON is an array of{" "}
+          <code>{`{ input, known_good }`}</code>.
+        </p>
+
         <form onSubmit={add} className="grid gap-3">
           <div className="grid gap-2">
             <Label>Input / brief</Label>
@@ -246,34 +353,60 @@ function GoldenSet({ base, cases, onChange }) {
           </Button>
         </form>
 
-        {cases.length ? (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Input</TableHead>
-                <TableHead>Known-good</TableHead>
-                <TableHead className="w-0 text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {cases.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell className="align-top">{c.input}</TableCell>
-                  <TableCell className="align-top">{c.known_good}</TableCell>
-                  <TableCell className="align-top text-right">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => remove(c.id)}
-                    >
-                      Delete
-                    </Button>
-                  </TableCell>
+        {rows.length ? (
+          <>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Input</TableHead>
+                  <TableHead>Known-good</TableHead>
+                  <TableHead className="w-0 text-right">Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {rows.map((c) => (
+                  <TableRow key={c.id}>
+                    <TableCell className="align-top">{c.input}</TableCell>
+                    <TableCell className="align-top">{c.known_good}</TableCell>
+                    <TableCell className="align-top text-right">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => remove(c.id)}
+                      >
+                        Delete
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground text-xs">
+                {start}–{end} of {total}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="ml-auto"
+                disabled={page <= 0}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+              >
+                Prev
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={page >= maxPage}
+                onClick={() => setPage((p) => Math.min(maxPage, p + 1))}
+              >
+                Next
+              </Button>
+            </div>
+          </>
         ) : (
           <p className="text-muted-foreground text-sm">No cases yet.</p>
         )}
