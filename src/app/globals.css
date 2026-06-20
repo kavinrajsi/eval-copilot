@@ -157,6 +157,13 @@ body {
   html {
     @apply font-sans;
   }
+  /* Clickable controls get a pointer (Tailwind v4 leaves native buttons on the
+     default arrow). Disabled controls keep the default cursor. */
+  button:not(:disabled):not([aria-disabled="true"]):not([data-disabled]),
+  [role="button"]:not([aria-disabled="true"]):not([data-disabled]),
+  a[href] {
+    cursor: pointer;
+  }
 }
 
 /* ── Home page signature: the graded specimen ───────────────────────── */
