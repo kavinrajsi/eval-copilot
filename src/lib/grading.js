@@ -139,7 +139,7 @@ export function validateRules(rules = []) {
  *
  * @returns {Promise<{decided_by: 'llm_suggested', note: string}>}
  */
-export async function suggestPossibleFailure(actual, knownGood) {
+export async function suggestPossibleFailure(actual, knownGood, knowledge) {
   const text = String(actual ?? "");
   const good = String(knownGood ?? "");
 
@@ -150,7 +150,7 @@ export async function suggestPossibleFailure(actual, knownGood) {
   if (process.env.ANTHROPIC_API_KEY) {
     try {
       const { suggestViaClaude } = await import("./grading-claude.js");
-      const note = await suggestViaClaude(text, good);
+      const note = await suggestViaClaude(text, good, knowledge);
       if (note) return { decided_by: "llm_suggested", note };
     } catch (err) {
       console.error("Claude suggestion failed; using heuristic:", err?.message);
@@ -169,14 +169,14 @@ export async function suggestPossibleFailure(actual, knownGood) {
  *
  * @returns {Promise<{verdict?: 'pass'|'fail', decided_by: string, note: string}>}
  */
-export async function judgeByLLM(actual, knownGood, ruleText) {
+export async function judgeByLLM(actual, knownGood, ruleText, knowledge) {
   const text = String(actual ?? "");
   const good = String(knownGood ?? "");
 
   if (process.env.ANTHROPIC_API_KEY) {
     try {
       const { judgeViaClaude } = await import("./grading-claude.js");
-      return await judgeViaClaude(text, good, ruleText);
+      return await judgeViaClaude(text, good, ruleText, knowledge);
     } catch (err) {
       console.error("Claude judge failed; falling back to suggest:", err?.message);
     }
@@ -193,11 +193,11 @@ export async function judgeByLLM(actual, knownGood, ruleText) {
  *
  * @returns {Promise<{decided_by: string, note: string}>}
  */
-export async function suggestImageFailure(imageBase64, mediaType, ruleText) {
+export async function suggestImageFailure(imageBase64, mediaType, ruleText, knowledge) {
   if (process.env.ANTHROPIC_API_KEY) {
     try {
       const { suggestImageViaClaude } = await import("./grading-claude.js");
-      return await suggestImageViaClaude(imageBase64, mediaType, ruleText);
+      return await suggestImageViaClaude(imageBase64, mediaType, ruleText, knowledge);
     } catch (err) {
       console.error("Claude image suggestion failed:", err?.message);
     }
@@ -215,16 +215,16 @@ export async function suggestImageFailure(imageBase64, mediaType, ruleText) {
  *
  * @returns {Promise<{verdict?: 'pass'|'fail', decided_by: string, note: string}>}
  */
-export async function judgeImageByLLM(imageBase64, mediaType, ruleText) {
+export async function judgeImageByLLM(imageBase64, mediaType, ruleText, knowledge) {
   if (process.env.ANTHROPIC_API_KEY) {
     try {
       const { judgeImageViaClaude } = await import("./grading-claude.js");
-      return await judgeImageViaClaude(imageBase64, mediaType, ruleText);
+      return await judgeImageViaClaude(imageBase64, mediaType, ruleText, knowledge);
     } catch (err) {
       console.error("Claude image judge failed; falling back to suggest:", err?.message);
     }
   }
-  return suggestImageFailure(imageBase64, mediaType, ruleText);
+  return suggestImageFailure(imageBase64, mediaType, ruleText, knowledge);
 }
 
 // Deterministic suggest-only hint (no key required, no verdict).

@@ -46,6 +46,14 @@ export async function POST(request, { params }) {
   const ruleText = rubric?.rule_text ?? "";
   const graderMode = rubric?.grader_mode ?? "suggest";
 
+  // Feature-level reference doc, fed to the AI grader as context (fuzzy path only).
+  const { data: feature } = await supabase
+    .from("feature")
+    .select("knowledge")
+    .eq("id", id)
+    .maybeSingle();
+  const knowledge = feature?.knowledge ?? "";
+
   // Known-good answers for the cases being graded.
   const caseIds = outputs.map((o) => o.golden_case_id);
   const { data: cases, error: caseErr } = await supabase
@@ -77,9 +85,9 @@ export async function POST(request, { params }) {
       if (machine) {
         result = gradeByRule(o.actual_output, knownGood, rules);
       } else if (graderMode === "judge") {
-        result = await judgeByLLM(o.actual_output, knownGood, ruleText);
+        result = await judgeByLLM(o.actual_output, knownGood, ruleText, knowledge);
       } else {
-        result = await suggestPossibleFailure(o.actual_output, knownGood);
+        result = await suggestPossibleFailure(o.actual_output, knownGood, knowledge);
       }
       return {
         run_id: run.id,

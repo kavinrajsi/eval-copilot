@@ -48,6 +48,14 @@ export async function POST(request, { params }) {
   const ruleText = rubric.rule_text ?? "";
   const graderMode = rubric.grader_mode ?? "suggest";
 
+  // Feature-level reference doc, fed to the AI grader as context.
+  const { data: feature } = await supabase
+    .from("feature")
+    .select("knowledge")
+    .eq("id", id)
+    .maybeSingle();
+  const knowledge = feature?.knowledge ?? "";
+
   let result;
   if (image) {
     // Vision path: machine rules can't see pixels, so always use the model.
@@ -64,15 +72,15 @@ export async function POST(request, { params }) {
     }
     result =
       graderMode === "judge"
-        ? await judgeImageByLLM(data, mediaType, ruleText)
-        : await suggestImageFailure(data, mediaType, ruleText);
+        ? await judgeImageByLLM(data, mediaType, ruleText, knowledge)
+        : await suggestImageFailure(data, mediaType, ruleText, knowledge);
   } else if (isMachineCheckable(rules)) {
     // Same Move 3 boundary as a real run, minus persistence and known-good.
     result = gradeByRule(content, "", rules);
   } else if (graderMode === "judge") {
-    result = await judgeByLLM(content, "", ruleText);
+    result = await judgeByLLM(content, "", ruleText, knowledge);
   } else {
-    result = await suggestPossibleFailure(content, "");
+    result = await suggestPossibleFailure(content, "", knowledge);
   }
 
   return ok({ result });

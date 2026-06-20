@@ -55,6 +55,7 @@ function Verdict({ value }) {
 }
 
 export default function FeatureWorkspace({ featureId }) {
+  const [feature, setFeature] = useState(null);
   const [cases, setCases] = useState([]);
   const [rubric, setRubric] = useState(null);
   const [runs, setRuns] = useState([]);
@@ -63,11 +64,13 @@ export default function FeatureWorkspace({ featureId }) {
 
   const loadAll = useCallback(async () => {
     try {
-      const [c, r, ru] = await Promise.all([
+      const [f, c, r, ru] = await Promise.all([
+        jsonFetch(base),
         jsonFetch(`${base}/golden-cases`),
         jsonFetch(`${base}/rubric`),
         jsonFetch(`${base}/runs`),
       ]);
+      setFeature(f.feature ?? null);
       setCases(c.golden_cases ?? []);
       setRubric(r.rubric ?? null);
       setRuns(ru.runs ?? []);
@@ -83,8 +86,9 @@ export default function FeatureWorkspace({ featureId }) {
   }, [loadAll]);
 
   return (
-    <Tabs defaultValue="golden">
+    <Tabs defaultValue="knowledge">
       <TabsList className="mb-4 flex-wrap">
+        <TabsTrigger value="knowledge">Knowledge</TabsTrigger>
         <TabsTrigger value="golden">Golden Set</TabsTrigger>
         <TabsTrigger value="rubric">Rubric</TabsTrigger>
         <TabsTrigger value="run">Run</TabsTrigger>
@@ -93,6 +97,9 @@ export default function FeatureWorkspace({ featureId }) {
         <TabsTrigger value="quick-test">Quick test</TabsTrigger>
       </TabsList>
 
+      <TabsContent value="knowledge">
+        <Knowledge key={feature?.id ?? "f"} base={base} feature={feature} onChange={loadAll} />
+      </TabsContent>
       <TabsContent value="golden">
         <GoldenSet base={base} cases={cases} onChange={loadAll} />
       </TabsContent>
@@ -112,6 +119,60 @@ export default function FeatureWorkspace({ featureId }) {
         <QuickTest base={base} rubric={rubric} />
       </TabsContent>
     </Tabs>
+  );
+}
+
+// --- Knowledge ------------------------------------------------------------
+
+// A per-feature reference doc (brand guidelines, source material, context) the
+// AI grader reads. Comes before the Golden Set: you set the reference, then
+// write the cases. Keyed on feature id by the parent so initial state comes
+// from the prop once it loads.
+function Knowledge({ base, feature, onChange }) {
+  const [knowledge, setKnowledge] = useState(feature?.knowledge ?? "");
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await jsonFetch(base, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ knowledge }),
+      });
+      onChange();
+    } catch (err) {
+      toast.error(`Couldn't save knowledge: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Knowledge</CardTitle>
+        <CardDescription>
+          The reference the grader reads — paste brand guidelines, source
+          material, or context here <em>before</em> you build the golden set. The
+          AI uses it on fuzzy and image checks; machine rules ignore it.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <div className="grid gap-2">
+          <Label>Reference document</Label>
+          <Textarea
+            value={knowledge}
+            onChange={(e) => setKnowledge(e.target.value)}
+            placeholder="e.g. brand voice, palette, banned terms, do/don't rules…"
+            className="min-h-64 font-mono text-xs"
+          />
+        </div>
+        <Button onClick={save} disabled={busy} className="justify-self-start">
+          {busy ? "Saving…" : "Save knowledge"}
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 

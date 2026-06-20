@@ -11,6 +11,14 @@ import Anthropic from "@anthropic-ai/sdk";
 // fast/cheap Haiku tier. Override to "claude-sonnet-4-5" for sharper judgment.
 const MODEL = process.env.ANTHROPIC_SUGGEST_MODEL || "claude-haiku-4-5";
 
+// Optional per-feature knowledge/reference doc, prepended to the prompt so the
+// grader judges against the full source material (e.g. brand guidelines), not
+// just the one-line rubric. Returns "" when there's no knowledge.
+function sourceBlock(knowledge) {
+  const k = String(knowledge ?? "").trim();
+  return k ? `SOURCE / REFERENCE:\n${k}\n\n` : "";
+}
+
 const SYSTEM = `You are a meticulous QA reviewer assisting a human grader of AI feature outputs.
 
 You NEVER give a final pass/fail verdict — a human decides that. Your only job is to flag concrete, likely problems for that human to confirm.
@@ -28,7 +36,7 @@ Respond in 1-3 short, plain-text sentences. If nothing clearly stands out, say s
  * @param {string} knownGood
  * @returns {Promise<string>}
  */
-export async function suggestViaClaude(actual, knownGood) {
+export async function suggestViaClaude(actual, knownGood, knowledge) {
   // Reads ANTHROPIC_API_KEY from the environment.
   const client = new Anthropic();
 
@@ -39,7 +47,7 @@ export async function suggestViaClaude(actual, knownGood) {
     messages: [
       {
         role: "user",
-        content: `KNOWN-GOOD answer:\n${knownGood || "(none provided)"}\n\nACTUAL output:\n${actual || "(empty)"}\n\nFlag possible problems with the actual output for a human to review.`,
+        content: `${sourceBlock(knowledge)}KNOWN-GOOD answer:\n${knownGood || "(none provided)"}\n\nACTUAL output:\n${actual || "(empty)"}\n\nFlag possible problems with the actual output for a human to review.`,
       },
     ],
   });
@@ -75,7 +83,7 @@ const JUDGE_SCHEMA = {
  *
  * @returns {Promise<{verdict: 'pass'|'fail', decided_by: 'llm_judge', note: string}>}
  */
-export async function judgeViaClaude(actual, knownGood, ruleText) {
+export async function judgeViaClaude(actual, knownGood, ruleText, knowledge) {
   const client = new Anthropic();
 
   const response = await client.messages.create({
@@ -86,7 +94,7 @@ export async function judgeViaClaude(actual, knownGood, ruleText) {
     messages: [
       {
         role: "user",
-        content: `RUBRIC:\n${ruleText || "(none provided)"}\n\nKNOWN-GOOD answer:\n${knownGood || "(none provided)"}\n\nACTUAL output:\n${actual || "(empty)"}\n\nScore the actual output pass or fail against the rubric.`,
+        content: `${sourceBlock(knowledge)}RUBRIC:\n${ruleText || "(none provided)"}\n\nKNOWN-GOOD answer:\n${knownGood || "(none provided)"}\n\nACTUAL output:\n${actual || "(empty)"}\n\nScore the actual output pass or fail against the rubric.`,
       },
     ],
   });
@@ -139,7 +147,7 @@ function imageBlock(imageBase64, mediaType) {
  * Vision suggest — SUGGEST ONLY, no verdict. Flags visible problems in an image.
  * @returns {Promise<{decided_by: 'llm_suggested', note: string}>}
  */
-export async function suggestImageViaClaude(imageBase64, mediaType, ruleText) {
+export async function suggestImageViaClaude(imageBase64, mediaType, ruleText, knowledge) {
   const client = new Anthropic();
 
   const response = await client.messages.create({
@@ -153,7 +161,7 @@ export async function suggestImageViaClaude(imageBase64, mediaType, ruleText) {
           imageBlock(imageBase64, mediaType),
           {
             type: "text",
-            text: `RUBRIC:\n${ruleText || "(none provided)"}\n\nFlag possible problems with this image for a human to review.`,
+            text: `${sourceBlock(knowledge)}RUBRIC:\n${ruleText || "(none provided)"}\n\nFlag possible problems with this image for a human to review.`,
           },
         ],
       },
@@ -174,7 +182,7 @@ export async function suggestImageViaClaude(imageBase64, mediaType, ruleText) {
  * still override. Throws on provider/parse errors so the caller can fall back.
  * @returns {Promise<{verdict: 'pass'|'fail', decided_by: 'llm_judge', note: string}>}
  */
-export async function judgeImageViaClaude(imageBase64, mediaType, ruleText) {
+export async function judgeImageViaClaude(imageBase64, mediaType, ruleText, knowledge) {
   const client = new Anthropic();
 
   const response = await client.messages.create({
@@ -189,7 +197,7 @@ export async function judgeImageViaClaude(imageBase64, mediaType, ruleText) {
           imageBlock(imageBase64, mediaType),
           {
             type: "text",
-            text: `RUBRIC:\n${ruleText || "(none provided)"}\n\nScore this image pass or fail against the rubric.`,
+            text: `${sourceBlock(knowledge)}RUBRIC:\n${ruleText || "(none provided)"}\n\nScore this image pass or fail against the rubric.`,
           },
         ],
       },
