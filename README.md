@@ -46,8 +46,8 @@ Track B walks the shared five-move spine. Each move ends in a deliverable.
 | Move | What you do | Submit |
 | --- | --- | --- |
 | **1. Be the eval yourself, on two real apps** | Sit with 2 builders, force 5 known-good cases into existence, run their feature, grade by hand. | The raw record + whether they had any answer key before you sat down. → [doc/](doc/) |
-| **2. Write down your bet, before you build** | Claim + 3 numbers + kill-number, as your first timestamped commit. | The timestamped hypothesis. |
-| **3. Decide what the computer judges, and what it must not** | Draw the deterministic/probabilistic boundary; circle where the grader sits. | Hand-drawn boundary diagram + the failure mode you accepted. |
+| **2. Write down your bet, before you build** | Claim + 3 numbers + kill-number, as your first timestamped commit. | The timestamped hypothesis. → [hypothesis.md](./hypothesis.md) |
+| **3. Decide what the computer checks, and what only a person can** | Draw the line between what a simple rule can check and what needs judgement; mark who makes the final call. | The diagram + the failure you accepted. → [who-checks-what.md](./who-checks-what.md) |
 | **4. Draw the domain model** | Hand-draw the schema (feature → golden cases → rubric → run → grade), mark the run-to-run comparison keys, add row-level security + two-user test. | Hand-drawn schema + proof the two-user test passes. |
 | **5. Put it in front of two people, report what really happened** | Two builders run their own feature through the tool (one cold); capture before-run → change → after-run. | The before/after evidence + the surprise. |
 
@@ -58,6 +58,8 @@ Track B walks the shared five-move spine. Each move ends in a deliverable.
 ```text
 .
 ├── README.md           This file
+├── hypothesis.md       Move 2 — the timestamped bet (claim + 3 numbers + kill-number)
+├── who-checks-what.md  Move 3 — what the computer checks vs. what a person checks
 └── doc/
     ├── summary.md      Executive summary across all evaluations
     ├── user-1.md       Maha — AI Jewellery Image Generator
