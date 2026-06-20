@@ -42,6 +42,8 @@ const RULE_TYPES = [
   "must_contain",
   "exact_match",
   "count_equals",
+  "rouge_l",
+  "jaccard",
 ];
 
 function Verdict({ value }) {
@@ -288,21 +290,32 @@ function Rubric({ base, rubric, onChange }) {
   const [ruleText, setRuleText] = useState(rubric?.rule_text ?? "");
   const [rules, setRules] = useState(rubric?.rules ?? []);
   const [graderMode, setGraderMode] = useState(rubric?.grader_mode ?? "suggest");
+  const [criteria, setCriteria] = useState(rubric?.criteria ?? []);
+  const [passThreshold, setPassThreshold] = useState(rubric?.pass_threshold ?? 70);
+  const [critName, setCritName] = useState("");
+  const [critDesc, setCritDesc] = useState("");
   const [type, setType] = useState("max_length");
   const [value, setValue] = useState("");
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const numericRule = ["max_length", "min_length", "count_equals", "rouge_l", "jaccard"];
+
   function addRule() {
     const rule = { type };
-    if (type === "max_length" || type === "min_length" || type === "count_equals") {
-      rule.value = Number(value);
-    }
+    if (numericRule.includes(type)) rule.value = Number(value);
     if (type === "must_contain" || type === "must_not_contain") rule.value = value;
     if (type === "count_equals") rule.token = token;
     setRules((prev) => [...prev, rule]);
     setValue("");
     setToken("");
+  }
+
+  function addCriterion() {
+    if (!critName.trim()) return;
+    setCriteria((prev) => [...prev, { name: critName.trim(), description: critDesc.trim() }]);
+    setCritName("");
+    setCritDesc("");
   }
 
   async function save() {
@@ -311,7 +324,13 @@ function Rubric({ base, rubric, onChange }) {
       await jsonFetch(`${base}/rubric`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rule_text: ruleText, rules, grader_mode: graderMode }),
+        body: JSON.stringify({
+          rule_text: ruleText,
+          rules,
+          grader_mode: graderMode,
+          criteria,
+          pass_threshold: Number(passThreshold),
+        }),
       });
       onChange();
     } catch (err) {
@@ -419,6 +438,67 @@ function Rubric({ base, rubric, onChange }) {
             decide on their own.
           </p>
         </div>
+
+        {graderMode === "judge" ? (
+          <div className="grid gap-3">
+            <Label>Scoring criteria (judge mode)</Label>
+            <p className="text-muted-foreground text-xs">
+              With criteria, the AI scores each one 0–100 and an overall; pass if
+              overall ≥ threshold. Leave empty for a plain pass/fail judge.
+            </p>
+            <div className="flex flex-wrap items-end gap-2">
+              <Input
+                placeholder="criterion (e.g. Strategic)"
+                value={critName}
+                onChange={(e) => setCritName(e.target.value)}
+                className="w-48"
+              />
+              <Input
+                placeholder="what it means (optional)"
+                value={critDesc}
+                onChange={(e) => setCritDesc(e.target.value)}
+                className="w-64"
+              />
+              <Button type="button" variant="secondary" onClick={addCriterion}>
+                Add criterion
+              </Button>
+            </div>
+            {criteria.length ? (
+              <ul className="grid gap-1">
+                {criteria.map((c, i) => (
+                  <li key={i} className="flex items-center justify-between rounded border px-3 py-2 text-sm">
+                    <span>
+                      <strong>{c.name}</strong>
+                      {c.description ? <span className="text-muted-foreground"> — {c.description}</span> : null}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setCriteria((p) => p.filter((_, j) => j !== i))}
+                    >
+                      Remove
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-muted-foreground text-sm">No criteria — judge returns a plain pass/fail.</p>
+            )}
+            <div className="flex items-center gap-2">
+              <Label htmlFor="pass-threshold" className="text-xs">Pass threshold</Label>
+              <Input
+                id="pass-threshold"
+                type="number"
+                min="0"
+                max="100"
+                value={passThreshold}
+                onChange={(e) => setPassThreshold(e.target.value)}
+                className="w-24"
+              />
+            </div>
+          </div>
+        ) : null}
 
         <Button onClick={save} disabled={busy || !ruleText.trim()} className="justify-self-start">
           {busy ? "Saving…" : "Save rubric"}
@@ -613,6 +693,8 @@ function Results({ runs, onChange }) {
           ) : null}
         </div>
 
+        <ConfusionMatrix grades={grades} />
+
         {grades.length ? (
           <Table>
             <TableHeader>
@@ -628,7 +710,12 @@ function Results({ runs, onChange }) {
               {grades.map((g) => (
                 <TableRow key={g.id}>
                   <TableCell className="max-w-[16rem] align-top text-xs">{g.golden_case?.input}</TableCell>
-                  <TableCell className="align-top"><Verdict value={g.verdict} /></TableCell>
+                  <TableCell className="align-top">
+                    <Verdict value={g.verdict} />
+                    {g.score != null ? (
+                      <span className="text-muted-foreground ml-1 text-xs">{g.score}/100</span>
+                    ) : null}
+                  </TableCell>
                   <TableCell className="text-muted-foreground align-top text-xs">{g.decided_by}</TableCell>
                   <TableCell className="align-top text-sm">{g.note ?? "—"}</TableCell>
                   <TableCell className="space-x-1 text-right align-top">
@@ -646,6 +733,91 @@ function Results({ runs, onChange }) {
         ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+// --- Confusion matrix -----------------------------------------------------
+
+// Machine verdict (auto_verdict, captured at grade time) vs the human verdict,
+// over cases a human reviewed. The dangerous cell is machine PASS + human FAIL
+// (a false pass — the grader would have shipped a bad output). Only counts
+// cases where the machine actually produced a verdict AND a human decided.
+function ConfusionMatrix({ grades }) {
+  const reviewed = grades.filter(
+    (g) =>
+      g.decided_by === "human" &&
+      (g.auto_verdict === "pass" || g.auto_verdict === "fail"),
+  );
+  if (!reviewed.length) return null;
+
+  const count = (m, h) =>
+    reviewed.filter((g) => g.auto_verdict === m && g.verdict === h).length;
+  const truePass = count("pass", "pass");
+  const falsePass = count("pass", "fail");
+  const falseFail = count("fail", "pass");
+  const trueFail = count("fail", "fail");
+  const total = reviewed.length;
+  const falsePassRate = ((falsePass / total) * 100).toFixed(0);
+
+  // Classification metrics. Positive class = the grader flags a FAIL (catching a
+  // bad output): TP=trueFail, FP=falseFail, FN=falsePass, TN=truePass.
+  const tp = trueFail;
+  const fp = falseFail;
+  const fn = falsePass;
+  const pct = (n, d) => (d ? `${((n / d) * 100).toFixed(0)}%` : "—");
+  const precision = pct(tp, tp + fp);
+  const recall = pct(tp, tp + fn);
+  const accuracy = pct(truePass + trueFail, total);
+  const f1 =
+    tp && 2 * tp + fp + fn ? ((2 * tp) / (2 * tp + fp + fn)).toFixed(2) : "—";
+
+  const cell = (n, danger) => (
+    <TableCell className={`text-center font-medium ${danger && n ? "text-destructive" : ""}`}>
+      {n}
+      {danger && n ? " ⚠" : ""}
+    </TableCell>
+  );
+
+  return (
+    <div className="grid gap-2 rounded-md border p-4">
+      <p className="text-sm font-medium">
+        Grader vs human ({total} reviewed) —{" "}
+        <span className={falsePass ? "text-destructive" : ""}>
+          {falsePass} false pass{falsePass === 1 ? "" : "es"} ({falsePassRate}%)
+        </span>
+        , {falseFail} false fail
+      </p>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-32" />
+            <TableHead className="text-center">human PASS</TableHead>
+            <TableHead className="text-center">human FAIL</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow>
+            <TableCell className="text-muted-foreground text-xs">machine PASS</TableCell>
+            {cell(truePass, false)}
+            {cell(falsePass, true)}
+          </TableRow>
+          <TableRow>
+            <TableCell className="text-muted-foreground text-xs">machine FAIL</TableCell>
+            {cell(falseFail, false)}
+            {cell(trueFail, false)}
+          </TableRow>
+        </TableBody>
+      </Table>
+      <p className="text-sm">
+        Accuracy {accuracy} · Precision {precision} · Recall {recall} · F1 {f1}
+      </p>
+      <p className="text-muted-foreground text-xs">
+        Positive class = grader flags a FAIL (catching a bad output). Recall is
+        how many truly-bad outputs it caught; a miss is a false pass. Counts only
+        cases a human reviewed and the machine had scored, so this is agreement on
+        reviewed cases — not a population-wide rate.
+      </p>
+    </div>
   );
 }
 
@@ -861,7 +1033,12 @@ function QuickTest({ base, rubric }) {
               {history.map((t) => (
                 <TableRow key={t.id}>
                   <TableCell className="max-w-[14rem] align-top text-xs">{t.content}</TableCell>
-                  <TableCell className="align-top"><Verdict value={t.verdict} /></TableCell>
+                  <TableCell className="align-top">
+                    <Verdict value={t.verdict} />
+                    {t.score != null ? (
+                      <span className="text-muted-foreground ml-1 text-xs">{t.score}/100</span>
+                    ) : null}
+                  </TableCell>
                   <TableCell className="text-muted-foreground align-top text-xs">{t.decided_by}</TableCell>
                   <TableCell className="align-top text-sm">{t.note ?? "—"}</TableCell>
                   <TableCell className="align-top text-right">

@@ -116,6 +116,84 @@ export async function judgeViaClaude(actual, knownGood, ruleText, knowledge) {
   };
 }
 
+// --- Multi-criteria judge --------------------------------------------------
+
+const MULTI_JUDGE_SYSTEM = `You are an evaluation judge scoring one output against a set of named CRITERIA.
+
+For each criterion, give an integer score from 0 to 100 and a one-sentence rationale grounded in the output (and the SOURCE / REFERENCE and KNOWN-GOOD when provided). Then give an overall_score (0-100) reflecting the output as a whole. Be precise and honest — a human may override your scores.`;
+
+const MULTI_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    scores: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          criterion: { type: "string" },
+          score: { type: "integer" },
+          rationale: { type: "string" },
+        },
+        required: ["criterion", "score", "rationale"],
+      },
+    },
+    overall_score: { type: "integer" },
+    summary: { type: "string" },
+  },
+  required: ["scores", "overall_score", "summary"],
+};
+
+/**
+ * Score one output on each named criterion (0-100) plus an overall, then
+ * pass/fail against the threshold. Throws on provider/parse errors so the
+ * caller can fall back.
+ *
+ * @returns {Promise<{verdict: 'pass'|'fail', score: number, scores: object, decided_by: 'llm_judge', note: string}>}
+ */
+export async function judgeMultiViaClaude(actual, knownGood, ruleText, knowledge, criteria, threshold) {
+  const client = new Anthropic();
+  const list = criteria
+    .map((c) => `- ${c.name}${c.description ? `: ${c.description}` : ""}`)
+    .join("\n");
+
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1024,
+    system: MULTI_JUDGE_SYSTEM,
+    output_config: { format: { type: "json_schema", schema: MULTI_SCHEMA } },
+    messages: [
+      {
+        role: "user",
+        content: `${sourceBlock(knowledge)}CRITERIA (score each 0-100):\n${list}\n\nRUBRIC:\n${ruleText || "(none provided)"}\n\nKNOWN-GOOD answer:\n${knownGood || "(none provided)"}\n\nACTUAL output:\n${actual || "(empty)"}\n\nScore each criterion 0-100 and give an overall_score (0-100).`,
+      },
+    ],
+  });
+
+  const text = response.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("");
+
+  const parsed = JSON.parse(text); // throws on malformed output → caller falls back
+  const scoresObj = {};
+  for (const s of parsed.scores ?? []) scoresObj[s.criterion] = s.score;
+  const overall = Number(parsed.overall_score ?? 0);
+  const verdict = overall >= threshold ? "pass" : "fail";
+  const breakdown = (parsed.scores ?? [])
+    .map((s) => `${s.criterion} ${s.score}`)
+    .join(", ");
+
+  return {
+    verdict,
+    score: overall,
+    scores: scoresObj,
+    decided_by: "llm_judge",
+    note: `[${overall}/100, threshold ${threshold}] ${parsed.summary ?? ""}${breakdown ? ` — ${breakdown}` : ""}`.trim(),
+  };
+}
+
 // --- Vision path (images) --------------------------------------------------
 // Machine rules can't see pixels, so an image is always judged by the model
 // against the rubric's plain-English rule. The configured model MUST support

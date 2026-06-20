@@ -4,6 +4,7 @@ import {
   isMachineCheckable,
   judgeByLLM,
   judgeImageByLLM,
+  judgeMultiByLLM,
   suggestImageFailure,
   suggestPossibleFailure,
 } from "@/lib/grading";
@@ -24,7 +25,7 @@ export async function GET(_request, { params }) {
 
   const { data, error } = await auth.supabase
     .from("quick_test")
-    .select("id, kind, content, verdict, decided_by, note, created_at")
+    .select("id, kind, content, verdict, score, decided_by, note, created_at")
     .eq("feature_id", id)
     .order("created_at", { ascending: false });
 
@@ -65,7 +66,7 @@ export async function POST(request, { params }) {
 
   const { data: rubric, error } = await supabase
     .from("rubric")
-    .select("rule_text, rules, grader_mode")
+    .select("rule_text, rules, grader_mode, criteria, pass_threshold")
     .eq("feature_id", id)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -76,6 +77,8 @@ export async function POST(request, { params }) {
   const rules = rubric.rules ?? [];
   const ruleText = rubric.rule_text ?? "";
   const graderMode = rubric.grader_mode ?? "suggest";
+  const criteria = rubric.criteria ?? [];
+  const threshold = rubric.pass_threshold ?? 70;
 
   // Feature-level reference doc, fed to the AI grader as context.
   const { data: feature } = await supabase
@@ -111,6 +114,8 @@ export async function POST(request, { params }) {
   } else if (isMachineCheckable(rules)) {
     // Same Move 3 boundary as a real run, minus known-good.
     result = gradeByRule(content, "", rules);
+  } else if (graderMode === "judge" && criteria.length) {
+    result = await judgeMultiByLLM(content, "", ruleText, knowledge, criteria, threshold);
   } else if (graderMode === "judge") {
     result = await judgeByLLM(content, "", ruleText, knowledge);
   } else {
@@ -125,10 +130,11 @@ export async function POST(request, { params }) {
       kind,
       content: savedContent,
       verdict: result.verdict ?? null,
+      score: result.score ?? null,
       decided_by: result.decided_by,
       note: result.note ?? null,
     })
-    .select("id, kind, content, verdict, decided_by, note, created_at")
+    .select("id, kind, content, verdict, score, decided_by, note, created_at")
     .single();
   if (saveErr) return badRequest(saveErr.message);
 

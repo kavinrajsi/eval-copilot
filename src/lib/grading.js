@@ -64,6 +64,22 @@ export function gradeByRule(actual, knownGood, rules = []) {
         break;
       }
 
+      case "rouge_l": {
+        const s = rougeL(text, String(knownGood ?? ""));
+        if (s < rule.value) {
+          return fail(`ROUGE-L ${s.toFixed(2)} < ${rule.value} vs known-good`);
+        }
+        break;
+      }
+
+      case "jaccard": {
+        const s = jaccard(text, String(knownGood ?? ""));
+        if (s < rule.value) {
+          return fail(`Jaccard ${s.toFixed(2)} < ${rule.value} vs known-good`);
+        }
+        break;
+      }
+
       default:
         // Unknown rule type is ignored rather than silently passing/failing.
         break;
@@ -88,6 +104,8 @@ const RULE_TYPES = new Set([
   "must_not_contain",
   "exact_match",
   "count_equals",
+  "rouge_l",
+  "jaccard",
 ]);
 
 /**
@@ -123,6 +141,11 @@ export function validateRules(rules = []) {
       }
       if (typeof rule.value !== "number" || Number.isNaN(rule.value)) {
         return { ok: false, error: `${where}: count_equals needs a numeric value` };
+      }
+    }
+    if (rule.type === "rouge_l" || rule.type === "jaccard") {
+      if (typeof rule.value !== "number" || rule.value < 0 || rule.value > 1) {
+        return { ok: false, error: `${where}: ${rule.type} needs a threshold between 0 and 1` };
       }
     }
   }
@@ -225,6 +248,67 @@ export async function judgeImageByLLM(imageBase64, mediaType, ruleText, knowledg
     }
   }
   return suggestImageFailure(imageBase64, mediaType, ruleText, knowledge);
+}
+
+/**
+ * Multi-criteria LLM judge — score the output on each rubric criterion (0-100)
+ * plus an overall, and pass/fail against the threshold. Human can override.
+ * Falls back to the single-verdict judge when no provider/criteria, so a case is
+ * never given a fabricated score.
+ *
+ * @returns {Promise<{verdict?: 'pass'|'fail', score?: number, scores?: object, decided_by: string, note: string}>}
+ */
+export async function judgeMultiByLLM(actual, knownGood, ruleText, knowledge, criteria, threshold) {
+  if (process.env.ANTHROPIC_API_KEY && Array.isArray(criteria) && criteria.length) {
+    try {
+      const { judgeMultiViaClaude } = await import("./grading-claude.js");
+      return await judgeMultiViaClaude(actual, knownGood, ruleText, knowledge, criteria, threshold);
+    } catch (err) {
+      console.error("Claude multi-criteria judge failed; falling back:", err?.message);
+    }
+  }
+  // No key / no criteria — fall back to the single-verdict judge.
+  return judgeByLLM(actual, knownGood, ruleText, knowledge);
+}
+
+// --- Text-similarity helpers (deterministic, no provider) ------------------
+
+function tokenize(s) {
+  return String(s ?? "")
+    .toLowerCase()
+    .match(/[a-z0-9]+/g) || [];
+}
+
+// Jaccard overlap of the two token SETS (0..1).
+function jaccard(a, b) {
+  const A = new Set(tokenize(a));
+  const B = new Set(tokenize(b));
+  if (!A.size && !B.size) return 1;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  const union = A.size + B.size - inter;
+  return union ? inter / union : 0;
+}
+
+// ROUGE-L: F-measure over the longest common subsequence of the token lists.
+function rougeL(a, b) {
+  const x = tokenize(a);
+  const y = tokenize(b);
+  if (!x.length && !y.length) return 1;
+  if (!x.length || !y.length) return 0;
+  // LCS length via rolling DP (O(x*y) time, O(y) space).
+  let prev = new Array(y.length + 1).fill(0);
+  for (let i = 1; i <= x.length; i++) {
+    const curr = new Array(y.length + 1).fill(0);
+    for (let j = 1; j <= y.length; j++) {
+      curr[j] = x[i - 1] === y[j - 1] ? prev[j - 1] + 1 : Math.max(prev[j], curr[j - 1]);
+    }
+    prev = curr;
+  }
+  const lcs = prev[y.length];
+  const recall = lcs / x.length;
+  const precision = lcs / y.length;
+  return precision + recall ? (2 * precision * recall) / (precision + recall) : 0;
 }
 
 // Deterministic suggest-only hint (no key required, no verdict).

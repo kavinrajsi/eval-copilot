@@ -3,6 +3,7 @@ import {
   gradeByRule,
   isMachineCheckable,
   judgeByLLM,
+  judgeMultiByLLM,
   suggestPossibleFailure,
 } from "@/lib/grading";
 
@@ -37,7 +38,7 @@ export async function POST(request, { params }) {
   // Latest rubric supplies the machine rules, plain-English text, and grader mode.
   const { data: rubric } = await supabase
     .from("rubric")
-    .select("rule_text, rules, grader_mode")
+    .select("rule_text, rules, grader_mode, criteria, pass_threshold")
     .eq("feature_id", id)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -45,6 +46,8 @@ export async function POST(request, { params }) {
   const rules = rubric?.rules ?? [];
   const ruleText = rubric?.rule_text ?? "";
   const graderMode = rubric?.grader_mode ?? "suggest";
+  const criteria = rubric?.criteria ?? [];
+  const threshold = rubric?.pass_threshold ?? 70;
 
   // Feature-level reference doc, fed to the AI grader as context (fuzzy path only).
   const { data: feature } = await supabase
@@ -84,6 +87,8 @@ export async function POST(request, { params }) {
       let result;
       if (machine) {
         result = gradeByRule(o.actual_output, knownGood, rules);
+      } else if (graderMode === "judge" && criteria.length) {
+        result = await judgeMultiByLLM(o.actual_output, knownGood, ruleText, knowledge, criteria, threshold);
       } else if (graderMode === "judge") {
         result = await judgeByLLM(o.actual_output, knownGood, ruleText, knowledge);
       } else {
@@ -94,6 +99,11 @@ export async function POST(request, { params }) {
         golden_case_id: o.golden_case_id,
         actual_output: o.actual_output ?? "",
         verdict: result.verdict ?? null,
+        // Preserve the machine's verdict so a later human override can be
+        // compared against it (confusion matrix). Null for suggest-only cases.
+        auto_verdict: result.verdict ?? null,
+        score: result.score ?? null,
+        scores: result.scores ?? null,
         decided_by: result.decided_by,
         note: result.note ?? null,
       };
