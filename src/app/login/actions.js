@@ -15,7 +15,16 @@ export async function authenticate(prevState, formData) {
   const intent = formData.get("intent");
 
   if (intent === "signup") {
-    const { data, error } = await supabase.auth.signUp(credentials);
+    const confirm = formData.get("confirm");
+    if (confirm != null && credentials.password !== confirm) {
+      return { error: "Passwords do not match." };
+    }
+
+    const fullName = formData.get("name");
+    const { data, error } = await supabase.auth.signUp({
+      ...credentials,
+      ...(fullName ? { options: { data: { full_name: fullName } } } : {}),
+    });
     if (error) return { error: error.message };
 
     // When email confirmation is enabled, no session is returned yet.

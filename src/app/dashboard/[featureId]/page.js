@@ -25,8 +25,13 @@ export default async function FeaturePage({ params }) {
   return (
     <div className="mx-auto max-w-4xl p-6">
       <div className="mb-6">
-        <Button asChild variant="ghost" size="sm" className="mb-2 -ml-2">
-          <Link href="/dashboard">← All features</Link>
+        <Button
+          render={<Link href="/dashboard" />}
+          variant="ghost"
+          size="sm"
+          className="mb-2 -ml-2"
+        >
+          ← All features
         </Button>
         <h1 className="text-2xl font-semibold">{feature.name}</h1>
         {feature.feature_type ? (
