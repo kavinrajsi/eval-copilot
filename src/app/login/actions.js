@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { getSiteURL } from "@/lib/site-url";
 import { createClient } from "@/lib/supabase/server";
 
 export async function authenticate(prevState, formData) {
@@ -21,9 +22,13 @@ export async function authenticate(prevState, formData) {
     }
 
     const fullName = formData.get("name");
+    const origin = await getSiteURL();
     const { data, error } = await supabase.auth.signUp({
       ...credentials,
-      ...(fullName ? { options: { data: { full_name: fullName } } } : {}),
+      options: {
+        emailRedirectTo: `${origin}/auth/callback?next=/dashboard`,
+        ...(fullName ? { data: { full_name: fullName } } : {}),
+      },
     });
     if (error) return { error: error.message };
 

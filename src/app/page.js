@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { ModeToggle } from "@/components/mode-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -29,7 +30,10 @@ const ideas = [
 
 export default function Home() {
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center px-6 py-16">
+    <div className="relative flex min-h-svh flex-col items-center justify-center px-6 py-16">
+      <div className="absolute top-4 right-4">
+        <ModeToggle />
+      </div>
       <main className="w-full max-w-3xl">
         <section className="flex flex-col items-start gap-6">
           <span className="text-muted-foreground text-sm font-medium tracking-wide uppercase">

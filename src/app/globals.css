@@ -27,12 +27,6 @@ a {
   text-decoration: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
-  }
-}
-
 @theme inline {
   --font-heading: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
