@@ -13,7 +13,7 @@ import {
   NativeSelectOption,
 } from "@/components/ui/native-select";
 import { isMachineCheckable } from "@/lib/grading";
-import { parseCsv } from "@/lib/csv";
+import { parseCsvWithHeaders } from "@/lib/csv";
 import {
   Table,
   TableBody,
@@ -34,6 +34,20 @@ async function jsonFetch(url, opts) {
     throw new Error(body?.error || `Request failed (${res.status})`);
   }
   return body;
+}
+
+// POST golden cases in 500-row chunks; returns the count inserted.
+async function postCasesChunked(base, cases) {
+  let inserted = 0;
+  for (let k = 0; k < cases.length; k += 500) {
+    const r = await jsonFetch(`${base}/golden-cases`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cases: cases.slice(k, k + 500) }),
+    });
+    inserted += r.inserted ?? r.golden_cases?.length ?? 0;
+  }
+  return inserted;
 }
 
 const RULE_TYPES = [
@@ -104,7 +118,7 @@ export default function FeatureWorkspace({ featureId }) {
         <Knowledge key={feature?.id ?? "f"} base={base} feature={feature} onChange={loadAll} />
       </TabsContent>
       <TabsContent value="golden">
-        <GoldenSet base={base} cases={cases} onChange={loadAll} />
+        <GoldenSet base={base} onChange={loadAll} />
       </TabsContent>
       <TabsContent value="rubric">
         <Rubric key={rubric?.id ?? "new"} base={base} rubric={rubric} onChange={loadAll} />
@@ -261,26 +275,13 @@ function GoldenSet({ base, onChange }) {
           known_good: c.known_good,
         }));
       } else {
-        const parsed = parseCsv(text);
-        if (!parsed.length) throw new Error("empty file");
-        const header = parsed[0].map((h) => h.trim().toLowerCase());
-        const iIn = header.indexOf("input");
-        const iKg = header.indexOf("known_good");
-        if (iIn < 0 || iKg < 0) throw new Error("CSV needs 'input' and 'known_good' headers");
-        cases = parsed.slice(1).map((r) => ({ input: r[iIn], known_good: r[iKg] }));
+        const { idx, rows: dataRows } = parseCsvWithHeaders(text, ["input", "known_good"]);
+        cases = dataRows.map((r) => ({ input: r[idx.input], known_good: r[idx.known_good] }));
       }
       cases = cases.filter((c) => c.input?.trim() && c.known_good?.trim());
       if (!cases.length) throw new Error("no valid rows (need input + known_good)");
 
-      let inserted = 0;
-      for (let k = 0; k < cases.length; k += 500) {
-        const r = await jsonFetch(`${base}/golden-cases`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ cases: cases.slice(k, k + 500) }),
-        });
-        inserted += r.inserted ?? r.golden_cases?.length ?? 0;
-      }
+      const inserted = await postCasesChunked(base, cases);
       toast.success(`Imported ${inserted} case${inserted === 1 ? "" : "s"}`);
       setPage(0);
       await refresh();
@@ -329,15 +330,7 @@ function GoldenSet({ base, onChange }) {
     }
     setGenBusy(true);
     try {
-      let inserted = 0;
-      for (let k = 0; k < keep.length; k += 500) {
-        const r = await jsonFetch(`${base}/golden-cases`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ cases: keep.slice(k, k + 500) }),
-        });
-        inserted += r.inserted ?? r.golden_cases?.length ?? 0;
-      }
+      const inserted = await postCasesChunked(base, keep);
       toast.success(`Saved ${inserted} case${inserted === 1 ? "" : "s"}`);
       setCandidates([]);
       setPage(0);
@@ -822,23 +815,17 @@ function RunPanel({ base, cases, rubric, onRun }) {
     if (!file) return;
     setBusy(true);
     try {
-      const parsed = parseCsv(await file.text());
-      if (!parsed.length) throw new Error("empty file");
-      const header = parsed[0].map((h) => h.trim().toLowerCase());
-      const iIn = header.indexOf("input");
-      const iOut = header.indexOf("actual_output");
-      if (iIn < 0 || iOut < 0) throw new Error("CSV needs 'input' and 'actual_output' headers");
-
+      const { idx, rows } = parseCsvWithHeaders(await file.text(), ["input", "actual_output"]);
       const byInput = new Map(cases.map((c) => [c.input.trim(), c.id]));
       const built = [];
       let unmatched = 0;
-      for (const r of parsed.slice(1)) {
-        const id = byInput.get((r[iIn] ?? "").trim());
-        if (!id) {
+      for (const r of rows) {
+        const cid = byInput.get((r[idx.input] ?? "").trim());
+        if (!cid) {
           unmatched++;
           continue;
         }
-        built.push({ golden_case_id: id, actual_output: r[iOut] ?? "" });
+        built.push({ golden_case_id: cid, actual_output: r[idx.actual_output] ?? "" });
       }
       if (!built.length) throw new Error("no rows matched a golden-case input");
 
@@ -986,6 +973,17 @@ function Results({ runs, onChange }) {
   const [page, setPage] = useState(0);
   const [reviewed, setReviewed] = useState([]); // full human-reviewed set for the matrix
 
+  const loadGrades = useCallback(async (rid, pg) => {
+    if (!rid) return;
+    try {
+      const b = await jsonFetch(`/api/runs/${rid}/grades?limit=${RESULTS_PAGE}&offset=${pg * RESULTS_PAGE}`);
+      setGrades(b.grades ?? []);
+      setTotal(b.total ?? 0);
+    } catch (e) {
+      toast.error(`Couldn't load grades: ${e.message}`);
+    }
+  }, []);
+
   const loadReviewed = useCallback(async (rid) => {
     if (!rid) return;
     try {
@@ -997,14 +995,9 @@ function Results({ runs, onChange }) {
   }, []);
 
   useEffect(() => {
-    if (!runId) return;
-    jsonFetch(`/api/runs/${runId}/grades?limit=${RESULTS_PAGE}&offset=${page * RESULTS_PAGE}`)
-      .then((b) => {
-        setGrades(b.grades ?? []);
-        setTotal(b.total ?? 0);
-      })
-      .catch((e) => toast.error(`Couldn't load grades: ${e.message}`));
-  }, [runId, page]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadGrades(runId, page);
+  }, [runId, page, loadGrades]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -1056,9 +1049,7 @@ function Results({ runs, onChange }) {
         toast.success("Grading finished.");
         onChange?.(); // refresh run-list status
         setPage(0);
-        const g = await jsonFetch(`/api/runs/${runId}/grades?limit=${RESULTS_PAGE}&offset=0`);
-        setGrades(g.grades ?? []);
-        setTotal(g.total ?? 0);
+        await loadGrades(runId, 0);
         loadReviewed(runId);
       } else {
         toast.message("Still grading…");

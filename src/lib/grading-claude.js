@@ -19,6 +19,41 @@ function sourceBlock(knowledge) {
   return k ? `SOURCE / REFERENCE:\n${k}\n\n` : "";
 }
 
+const DEFAULT_PASS_THRESHOLD = 70;
+
+// Concatenate the text of an Anthropic content array (response or batch message).
+function textOf(content) {
+  return (content || [])
+    .filter((b) => b.type === "text")
+    .map((b) => b.text)
+    .join("");
+}
+
+// Shape a parsed single-verdict judge result (live or batch). Used by the text
+// judge, the image judge, and the batch reader so the note format can't drift.
+function buildSingleGrade(parsed) {
+  return {
+    verdict: parsed.verdict === "pass" ? "pass" : "fail",
+    decided_by: "llm_judge",
+    note: `[${parsed.confidence ?? "low"} confidence] ${(parsed.rationale ?? "").trim()}`.trim(),
+  };
+}
+
+// Shape a parsed multi-criteria judge result (live or batch).
+function buildMultiGrade(parsed, threshold = DEFAULT_PASS_THRESHOLD) {
+  const scores = {};
+  for (const s of parsed.scores ?? []) scores[s.criterion] = s.score;
+  const overall = Number(parsed.overall_score ?? 0);
+  const breakdown = (parsed.scores ?? []).map((s) => `${s.criterion} ${s.score}`).join(", ");
+  return {
+    verdict: overall >= threshold ? "pass" : "fail",
+    score: overall,
+    scores,
+    decided_by: "llm_judge",
+    note: `[${overall}/100, threshold ${threshold}] ${parsed.summary ?? ""}${breakdown ? ` — ${breakdown}` : ""}`.trim(),
+  };
+}
+
 const SYSTEM = `You are a meticulous QA reviewer assisting a human grader of AI feature outputs.
 
 You NEVER give a final pass/fail verdict — a human decides that. Your only job is to flag concrete, likely problems for that human to confirm.
@@ -52,11 +87,7 @@ export async function suggestViaClaude(actual, knownGood, knowledge) {
     ],
   });
 
-  return response.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("")
-    .trim();
+  return textOf(response.content).trim();
 }
 
 const JUDGE_SYSTEM = `You are an evaluation judge scoring one AI feature output.
@@ -92,28 +123,11 @@ export async function judgeViaClaude(actual, knownGood, ruleText, knowledge) {
     system: JUDGE_SYSTEM,
     output_config: { format: { type: "json_schema", schema: JUDGE_SCHEMA } },
     messages: [
-      {
-        role: "user",
-        content: `${sourceBlock(knowledge)}RUBRIC:\n${ruleText || "(none provided)"}\n\nKNOWN-GOOD answer:\n${knownGood || "(none provided)"}\n\nACTUAL output:\n${actual || "(empty)"}\n\nScore the actual output pass or fail against the rubric.`,
-      },
+      { role: "user", content: judgeUserText(actual, knownGood, ruleText, knowledge) },
     ],
   });
 
-  const text = response.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("");
-
-  const parsed = JSON.parse(text); // throws on malformed output → caller falls back
-  const verdict = parsed.verdict === "pass" ? "pass" : "fail";
-  const confidence = parsed.confidence ?? "low";
-  const rationale = (parsed.rationale ?? "").trim();
-
-  return {
-    verdict,
-    decided_by: "llm_judge",
-    note: `[${confidence} confidence] ${rationale}`.trim(),
-  };
+  return buildSingleGrade(JSON.parse(textOf(response.content)));
 }
 
 // --- Multi-criteria judge --------------------------------------------------
@@ -154,9 +168,6 @@ const MULTI_SCHEMA = {
  */
 export async function judgeMultiViaClaude(actual, knownGood, ruleText, knowledge, criteria, threshold) {
   const client = new Anthropic();
-  const list = criteria
-    .map((c) => `- ${c.name}${c.description ? `: ${c.description}` : ""}`)
-    .join("\n");
 
   const response = await client.messages.create({
     model: MODEL,
@@ -164,34 +175,11 @@ export async function judgeMultiViaClaude(actual, knownGood, ruleText, knowledge
     system: MULTI_JUDGE_SYSTEM,
     output_config: { format: { type: "json_schema", schema: MULTI_SCHEMA } },
     messages: [
-      {
-        role: "user",
-        content: `${sourceBlock(knowledge)}CRITERIA (score each 0-100):\n${list}\n\nRUBRIC:\n${ruleText || "(none provided)"}\n\nKNOWN-GOOD answer:\n${knownGood || "(none provided)"}\n\nACTUAL output:\n${actual || "(empty)"}\n\nScore each criterion 0-100 and give an overall_score (0-100).`,
-      },
+      { role: "user", content: multiUserText(actual, knownGood, ruleText, knowledge, criteria) },
     ],
   });
 
-  const text = response.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("");
-
-  const parsed = JSON.parse(text); // throws on malformed output → caller falls back
-  const scoresObj = {};
-  for (const s of parsed.scores ?? []) scoresObj[s.criterion] = s.score;
-  const overall = Number(parsed.overall_score ?? 0);
-  const verdict = overall >= threshold ? "pass" : "fail";
-  const breakdown = (parsed.scores ?? [])
-    .map((s) => `${s.criterion} ${s.score}`)
-    .join(", ");
-
-  return {
-    verdict,
-    score: overall,
-    scores: scoresObj,
-    decided_by: "llm_judge",
-    note: `[${overall}/100, threshold ${threshold}] ${parsed.summary ?? ""}${breakdown ? ` — ${breakdown}` : ""}`.trim(),
-  };
+  return buildMultiGrade(JSON.parse(textOf(response.content)), threshold);
 }
 
 // --- User-message builders (shared by live judge calls and batch requests) ---
@@ -219,28 +207,23 @@ function multiUserText(actual, knownGood, ruleText, knowledge, criteria) {
 export async function submitJudgeBatchViaClaude(items, ctx) {
   const client = new Anthropic();
   const multi = Array.isArray(ctx.criteria) && ctx.criteria.length > 0;
+  const maxTokens = multi ? 1024 : 512;
+  const system = multi ? MULTI_JUDGE_SYSTEM : JUDGE_SYSTEM;
+  const schema = multi ? MULTI_SCHEMA : JUDGE_SCHEMA;
+  const userText = (it) =>
+    multi
+      ? multiUserText(it.actual_output, it.known_good, ctx.ruleText, ctx.knowledge, ctx.criteria)
+      : judgeUserText(it.actual_output, it.known_good, ctx.ruleText, ctx.knowledge);
 
   const requests = items.map((it) => ({
     custom_id: it.golden_case_id,
-    params: multi
-      ? {
-          model: MODEL,
-          max_tokens: 1024,
-          system: MULTI_JUDGE_SYSTEM,
-          output_config: { format: { type: "json_schema", schema: MULTI_SCHEMA } },
-          messages: [
-            { role: "user", content: multiUserText(it.actual_output, it.known_good, ctx.ruleText, ctx.knowledge, ctx.criteria) },
-          ],
-        }
-      : {
-          model: MODEL,
-          max_tokens: 512,
-          system: JUDGE_SYSTEM,
-          output_config: { format: { type: "json_schema", schema: JUDGE_SCHEMA } },
-          messages: [
-            { role: "user", content: judgeUserText(it.actual_output, it.known_good, ctx.ruleText, ctx.knowledge) },
-          ],
-        },
+    params: {
+      model: MODEL,
+      max_tokens: maxTokens,
+      system,
+      output_config: { format: { type: "json_schema", schema } },
+      messages: [{ role: "user", content: userText(it) }],
+    },
   }));
 
   const batch = await client.messages.batches.create({ requests });
@@ -263,37 +246,16 @@ export async function fetchBatchResultsViaClaude(batchId, threshold) {
       results.set(id, { decided_by: "llm_judge", note: "batch grading failed for this case" });
       continue;
     }
-    const text = (entry.result.message.content || [])
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
-      .join("");
     let parsed;
     try {
-      parsed = JSON.parse(text);
+      parsed = JSON.parse(textOf(entry.result.message.content));
     } catch {
       results.set(id, { decided_by: "llm_judge", note: "unparseable batch result" });
       continue;
     }
 
-    if (parsed.overall_score != null || Array.isArray(parsed.scores)) {
-      const scoresObj = {};
-      for (const s of parsed.scores ?? []) scoresObj[s.criterion] = s.score;
-      const overall = Number(parsed.overall_score ?? 0);
-      const breakdown = (parsed.scores ?? []).map((s) => `${s.criterion} ${s.score}`).join(", ");
-      results.set(id, {
-        verdict: overall >= (threshold ?? 70) ? "pass" : "fail",
-        score: overall,
-        scores: scoresObj,
-        decided_by: "llm_judge",
-        note: `[${overall}/100, threshold ${threshold ?? 70}] ${parsed.summary ?? ""}${breakdown ? ` — ${breakdown}` : ""}`.trim(),
-      });
-    } else {
-      results.set(id, {
-        verdict: parsed.verdict === "pass" ? "pass" : "fail",
-        decided_by: "llm_judge",
-        note: `[${parsed.confidence ?? "low"} confidence] ${(parsed.rationale ?? "").trim()}`.trim(),
-      });
-    }
+    const isMulti = parsed.overall_score != null || Array.isArray(parsed.scores);
+    results.set(id, isMulti ? buildMultiGrade(parsed, threshold) : buildSingleGrade(parsed));
   }
   return { status: "done", results };
 }
@@ -358,13 +320,9 @@ export async function generateCasesViaClaude(count, knowledge, ruleText, rules, 
       ],
     });
 
-    const text = response.content
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
-      .join("");
     let parsed;
     try {
-      parsed = JSON.parse(text);
+      parsed = JSON.parse(textOf(response.content));
     } catch {
       break;
     }
@@ -439,13 +397,7 @@ export async function suggestImageViaClaude(imageBase64, mediaType, ruleText, kn
     ],
   });
 
-  const note = response.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("")
-    .trim();
-
-  return { decided_by: "llm_suggested", note };
+  return { decided_by: "llm_suggested", note: textOf(response.content).trim() };
 }
 
 /**
@@ -475,19 +427,5 @@ export async function judgeImageViaClaude(imageBase64, mediaType, ruleText, know
     ],
   });
 
-  const text = response.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("");
-
-  const parsed = JSON.parse(text); // throws on malformed output → caller falls back
-  const verdict = parsed.verdict === "pass" ? "pass" : "fail";
-  const confidence = parsed.confidence ?? "low";
-  const rationale = (parsed.rationale ?? "").trim();
-
-  return {
-    verdict,
-    decided_by: "llm_judge",
-    note: `[${confidence} confidence] ${rationale}`.trim(),
-  };
+  return buildSingleGrade(JSON.parse(textOf(response.content)));
 }

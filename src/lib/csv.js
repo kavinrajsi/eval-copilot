@@ -57,6 +57,28 @@ export function parseCsv(text) {
   return rows.filter((r) => !(r.length === 1 && r[0].trim() === ""));
 }
 
+/**
+ * Parse CSV and map required header columns to their indexes. Returns
+ * { rows } where each row is the data rows (header stripped); throws if the
+ * file is empty or a required column is missing. Callers map cells via `cols`.
+ *
+ * @param {string} text
+ * @param {string[]} cols  required lowercase header names, e.g. ["input","known_good"]
+ * @returns {{ header: string[], idx: Record<string,number>, rows: string[][] }}
+ */
+export function parseCsvWithHeaders(text, cols) {
+  const parsed = parseCsv(text);
+  if (!parsed.length) throw new Error("empty file");
+  const header = parsed[0].map((h) => h.trim().toLowerCase());
+  const idx = {};
+  for (const c of cols) {
+    const i = header.indexOf(c);
+    if (i < 0) throw new Error(`CSV needs ${cols.map((x) => `'${x}'`).join(" and ")} headers`);
+    idx[c] = i;
+  }
+  return { header, idx, rows: parsed.slice(1) };
+}
+
 export function toCsv(rows) {
   const esc = (v) => {
     const str = String(v ?? "");

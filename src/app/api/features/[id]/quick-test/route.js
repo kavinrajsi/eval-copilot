@@ -1,13 +1,5 @@
 import { badRequest, ok, requireUser } from "@/lib/api";
-import {
-  gradeByRule,
-  isMachineCheckable,
-  judgeByLLM,
-  judgeImageByLLM,
-  judgeMultiByLLM,
-  suggestImageFailure,
-  suggestPossibleFailure,
-} from "@/lib/grading";
+import { gradeText, judgeImageByLLM, suggestImageFailure } from "@/lib/grading";
 
 const IMAGE_MEDIA_TYPES = new Set([
   "image/png",
@@ -74,19 +66,21 @@ export async function POST(request, { params }) {
   if (error) return badRequest(error.message);
   if (!rubric) return badRequest("This feature has no rubric yet — save one first.");
 
-  const rules = rubric.rules ?? [];
-  const ruleText = rubric.rule_text ?? "";
-  const graderMode = rubric.grader_mode ?? "suggest";
-  const criteria = rubric.criteria ?? [];
-  const threshold = rubric.pass_threshold ?? 70;
-
   // Feature-level reference doc, fed to the AI grader as context.
   const { data: feature } = await supabase
     .from("feature")
     .select("knowledge")
     .eq("id", id)
     .maybeSingle();
-  const knowledge = feature?.knowledge ?? "";
+
+  const ctx = {
+    rules: rubric.rules ?? [],
+    ruleText: rubric.rule_text ?? "",
+    graderMode: rubric.grader_mode ?? "suggest",
+    criteria: rubric.criteria ?? [],
+    threshold: rubric.pass_threshold ?? 70,
+    knowledge: feature?.knowledge ?? "",
+  };
 
   let result;
   let kind = "text";
@@ -108,18 +102,12 @@ export async function POST(request, { params }) {
     // We don't persist the image bytes — just a short descriptor for history.
     savedContent = `(image: ${mediaType})`;
     result =
-      graderMode === "judge"
-        ? await judgeImageByLLM(data, mediaType, ruleText, knowledge)
-        : await suggestImageFailure(data, mediaType, ruleText, knowledge);
-  } else if (isMachineCheckable(rules)) {
-    // Same Move 3 boundary as a real run, minus known-good.
-    result = gradeByRule(content, "", rules);
-  } else if (graderMode === "judge" && criteria.length) {
-    result = await judgeMultiByLLM(content, "", ruleText, knowledge, criteria, threshold);
-  } else if (graderMode === "judge") {
-    result = await judgeByLLM(content, "", ruleText, knowledge);
+      ctx.graderMode === "judge"
+        ? await judgeImageByLLM(data, mediaType, ctx.ruleText, ctx.knowledge)
+        : await suggestImageFailure(data, mediaType, ctx.ruleText, ctx.knowledge);
   } else {
-    result = await suggestPossibleFailure(content, "", knowledge);
+    // Text path: same Move 3 dispatch as a real run, minus known-good.
+    result = await gradeText(content, "", ctx);
   }
 
   // Save the result (no run / golden case — this is the ad-hoc Quick test log).

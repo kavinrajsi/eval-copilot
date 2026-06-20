@@ -1,4 +1,4 @@
-import { badRequest, ok, requireUser } from "@/lib/api";
+import { badRequest, ok, paginationParams, requireUser } from "@/lib/api";
 
 // GET /api/runs/:id/grades — grades for a run, with each case's input.
 // Pass ?limit (and ?offset) for a paginated page + exact total.
@@ -23,9 +23,7 @@ export async function GET(request, { params }) {
     return ok({ grades: data });
   }
 
-  const limitParam = url.searchParams.get("limit");
-  const paginated = limitParam != null;
-
+  const { paginated, limit, offset } = paginationParams(url);
   let query = auth.supabase
     .from("grade")
     .select(
@@ -34,12 +32,7 @@ export async function GET(request, { params }) {
     )
     .eq("run_id", id)
     .order("created_at", { ascending: true });
-
-  if (paginated) {
-    const limit = Math.min(500, Math.max(1, Number(limitParam) || 50));
-    const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
-    query = query.range(offset, offset + limit - 1);
-  }
+  if (paginated) query = query.range(offset, offset + limit - 1);
 
   const { data, error, count } = await query;
   if (error) return badRequest(error.message);

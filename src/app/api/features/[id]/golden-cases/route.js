@@ -1,6 +1,6 @@
-import { badRequest, ok, requireUser } from "@/lib/api";
+import { badRequest, insertChunked, ok, paginationParams, requireUser } from "@/lib/api";
 
-const CHUNK = 500; // insert/select batch size — keeps payloads sane at scale
+const COLS = "id, input, known_good, created_at";
 
 // GET /api/features/:id/golden-cases — list this feature's golden set.
 // Pass ?limit= (and ?offset=) for a paginated page + exact total; with no
@@ -10,21 +10,13 @@ export async function GET(request, { params }) {
   if (auth.error) return auth.error;
   const { id } = await params;
 
-  const url = new URL(request.url);
-  const limitParam = url.searchParams.get("limit");
-  const paginated = limitParam != null;
-
+  const { paginated, limit, offset } = paginationParams(new URL(request.url));
   let query = auth.supabase
     .from("golden_case")
-    .select("id, input, known_good, created_at", paginated ? { count: "exact" } : {})
+    .select(COLS, paginated ? { count: "exact" } : {})
     .eq("feature_id", id)
     .order("created_at", { ascending: true });
-
-  if (paginated) {
-    const limit = Math.min(CHUNK, Math.max(1, Number(limitParam) || 50));
-    const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
-    query = query.range(offset, offset + limit - 1);
-  }
+  if (paginated) query = query.range(offset, offset + limit - 1);
 
   const { data, error, count } = await query;
   if (error) return badRequest(error.message);
@@ -41,25 +33,12 @@ export async function POST(request, { params }) {
   const incoming = Array.isArray(body.cases) ? body.cases : [body];
 
   const rows = incoming
-    .map((c) => ({
-      feature_id: id,
-      input: c.input?.trim(),
-      known_good: c.known_good?.trim(),
-    }))
+    .map((c) => ({ feature_id: id, input: c.input?.trim(), known_good: c.known_good?.trim() }))
     .filter((r) => r.input && r.known_good);
 
   if (!rows.length) return badRequest("each case needs input and known_good");
 
-  // Insert in chunks so a large import doesn't blow the request/row limits.
-  let inserted = [];
-  for (let k = 0; k < rows.length; k += CHUNK) {
-    const { data, error } = await auth.supabase
-      .from("golden_case")
-      .insert(rows.slice(k, k + CHUNK))
-      .select("id, input, known_good, created_at");
-    if (error) return badRequest(error.message);
-    inserted = inserted.concat(data);
-  }
-
-  return ok({ golden_cases: inserted, inserted: inserted.length }, 201);
+  const { data, error } = await insertChunked(auth.supabase, "golden_case", rows, COLS);
+  if (error) return badRequest(error.message);
+  return ok({ golden_cases: data, inserted: data.length }, 201);
 }

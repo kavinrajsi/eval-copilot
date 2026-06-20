@@ -30,21 +30,29 @@ export async function GET(_request, { params }) {
   const res = await fetchBatchResults(run.batch_id, rubric?.pass_threshold ?? 70);
   if (res.status !== "done") return ok({ status: res.status });
 
-  // Write each case's result onto its placeholder grade.
-  for (const [gcId, r] of res.results) {
-    const { error: upErr } = await supabase
-      .from("grade")
-      .update({
-        verdict: r.verdict ?? null,
-        auto_verdict: r.verdict ?? null,
-        score: r.score ?? null,
-        scores: r.scores ?? null,
-        decided_by: r.decided_by ?? "llm_judge",
-        note: r.note ?? null,
-      })
-      .eq("run_id", id)
-      .eq("golden_case_id", gcId);
-    if (upErr) return badRequest(upErr.message);
+  // Write each case's result onto its placeholder grade, bounded-parallel.
+  const entries = [...res.results];
+  const POOL = 8;
+  for (let k = 0; k < entries.length; k += POOL) {
+    const errs = await Promise.all(
+      entries.slice(k, k + POOL).map(([gcId, r]) =>
+        supabase
+          .from("grade")
+          .update({
+            verdict: r.verdict ?? null,
+            auto_verdict: r.verdict ?? null,
+            score: r.score ?? null,
+            scores: r.scores ?? null,
+            decided_by: r.decided_by ?? "llm_judge",
+            note: r.note ?? null,
+          })
+          .eq("run_id", id)
+          .eq("golden_case_id", gcId)
+          .then(({ error: e }) => e),
+      ),
+    );
+    const firstErr = errs.find(Boolean);
+    if (firstErr) return badRequest(firstErr.message);
   }
 
   await supabase.from("run").update({ status: "done" }).eq("id", id);

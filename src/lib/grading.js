@@ -97,6 +97,29 @@ export function isMachineCheckable(rules = []) {
   return Array.isArray(rules) && rules.length > 0;
 }
 
+/**
+ * Grade one text output via the Move 3 boundary, in one place: a machine rule
+ * when the rubric has one; otherwise the grader mode — multi-criteria judge (if
+ * criteria), plain judge, or suggest-only. Shared by the runs and quick-test
+ * routes so the dispatch can't drift. (Image grading stays in its caller.)
+ */
+export async function gradeText(content, knownGood, ctx = {}) {
+  const {
+    rules = [],
+    ruleText = "",
+    graderMode = "suggest",
+    criteria = [],
+    knowledge = "",
+    threshold = 70,
+  } = ctx;
+  if (isMachineCheckable(rules)) return gradeByRule(content, knownGood, rules);
+  if (graderMode === "judge" && criteria.length) {
+    return judgeMultiByLLM(content, knownGood, ruleText, knowledge, criteria, threshold);
+  }
+  if (graderMode === "judge") return judgeByLLM(content, knownGood, ruleText, knowledge);
+  return suggestPossibleFailure(content, knownGood, knowledge);
+}
+
 const RULE_TYPES = new Set([
   "max_length",
   "min_length",

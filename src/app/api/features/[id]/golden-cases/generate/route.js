@@ -15,18 +15,16 @@ export async function POST(request, { params }) {
   const count = Math.min(200, Math.max(1, Math.round(Number(body.count) || 10)));
   const seeds = typeof body.seeds === "string" ? body.seeds : "";
 
-  const { data: feature } = await supabase
-    .from("feature")
-    .select("knowledge")
-    .eq("id", id)
-    .maybeSingle();
-  const { data: rubric } = await supabase
-    .from("rubric")
-    .select("rule_text, rules")
-    .eq("feature_id", id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const [{ data: feature }, { data: rubric }] = await Promise.all([
+    supabase.from("feature").select("knowledge").eq("id", id).maybeSingle(),
+    supabase
+      .from("rubric")
+      .select("rule_text, rules")
+      .eq("feature_id", id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
   const result = await generateCases(
     count,
