@@ -933,7 +933,15 @@ function RunPanel({ base, cases, rubric, onRun }) {
           ) : null}
         </form>
 
-        {result?.summary ? (
+        {result?.status === "grading" ? (
+          <p className="text-muted-foreground mt-6 rounded-md border border-dashed px-3 py-2 text-sm">
+            Grading {result.summary?.total ?? "many"} cases in the background (async
+            batch). Open <strong>Results</strong>, pick this run, and use{" "}
+            <em>Check status</em> — verdicts appear when the batch finishes.
+          </p>
+        ) : null}
+
+        {result?.summary && result?.status !== "grading" ? (
           <div className="mt-6 grid gap-2">
             <p className="text-sm font-medium">
               {result.summary.pass} pass / {result.summary.fail} fail
@@ -1038,6 +1046,28 @@ function Results({ runs, onChange }) {
     }
   }
 
+  const selectedRun = runs.find((r) => r.id === runId);
+  const grading = selectedRun?.status === "grading";
+
+  async function checkStatus() {
+    try {
+      const b = await jsonFetch(`/api/runs/${runId}/status`);
+      if (b.status === "done") {
+        toast.success("Grading finished.");
+        onChange?.(); // refresh run-list status
+        setPage(0);
+        const g = await jsonFetch(`/api/runs/${runId}/grades?limit=${RESULTS_PAGE}&offset=0`);
+        setGrades(g.grades ?? []);
+        setTotal(g.total ?? 0);
+        loadReviewed(runId);
+      } else {
+        toast.message("Still grading…");
+      }
+    } catch (e) {
+      toast.error(`Status check failed: ${e.message}`);
+    }
+  }
+
   const start = total ? page * RESULTS_PAGE + 1 : 0;
   const end = Math.min(total, (page + 1) * RESULTS_PAGE);
   const maxPage = Math.max(0, Math.ceil(total / RESULTS_PAGE) - 1);
@@ -1068,6 +1098,17 @@ function Results({ runs, onChange }) {
             </Button>
           ) : null}
         </div>
+
+        {grading ? (
+          <div className="flex items-center gap-2 rounded-md border border-dashed px-3 py-2 text-sm">
+            <span className="text-muted-foreground">
+              Grading in the background (async batch)…
+            </span>
+            <Button type="button" variant="secondary" size="sm" className="ml-auto" onClick={checkStatus}>
+              Check status
+            </Button>
+          </div>
+        ) : null}
 
         <ConfusionMatrix grades={reviewed} />
 

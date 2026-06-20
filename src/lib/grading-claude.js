@@ -194,6 +194,110 @@ export async function judgeMultiViaClaude(actual, knownGood, ruleText, knowledge
   };
 }
 
+// --- User-message builders (shared by live judge calls and batch requests) ---
+
+function judgeUserText(actual, knownGood, ruleText, knowledge) {
+  return `${sourceBlock(knowledge)}RUBRIC:\n${ruleText || "(none provided)"}\n\nKNOWN-GOOD answer:\n${knownGood || "(none provided)"}\n\nACTUAL output:\n${actual || "(empty)"}\n\nScore the actual output pass or fail against the rubric.`;
+}
+
+function multiUserText(actual, knownGood, ruleText, knowledge, criteria) {
+  const list = criteria
+    .map((c) => `- ${c.name}${c.description ? `: ${c.description}` : ""}`)
+    .join("\n");
+  return `${sourceBlock(knowledge)}CRITERIA (score each 0-100):\n${list}\n\nRUBRIC:\n${ruleText || "(none provided)"}\n\nKNOWN-GOOD answer:\n${knownGood || "(none provided)"}\n\nACTUAL output:\n${actual || "(empty)"}\n\nScore each criterion 0-100 and give an overall_score (0-100).`;
+}
+
+// --- Message Batches (large async AI runs) ---------------------------------
+// Submit one batch request per case, custom_id = golden_case_id. Async: results
+// land minutes–hours later, fetched by the run-status poll.
+
+/**
+ * Create a Message Batch for a judge run. Returns the batch id.
+ * @param {Array<{golden_case_id, actual_output, known_good}>} items
+ * @param {{ruleText, knowledge, criteria, threshold}} ctx
+ */
+export async function submitJudgeBatchViaClaude(items, ctx) {
+  const client = new Anthropic();
+  const multi = Array.isArray(ctx.criteria) && ctx.criteria.length > 0;
+
+  const requests = items.map((it) => ({
+    custom_id: it.golden_case_id,
+    params: multi
+      ? {
+          model: MODEL,
+          max_tokens: 1024,
+          system: MULTI_JUDGE_SYSTEM,
+          output_config: { format: { type: "json_schema", schema: MULTI_SCHEMA } },
+          messages: [
+            { role: "user", content: multiUserText(it.actual_output, it.known_good, ctx.ruleText, ctx.knowledge, ctx.criteria) },
+          ],
+        }
+      : {
+          model: MODEL,
+          max_tokens: 512,
+          system: JUDGE_SYSTEM,
+          output_config: { format: { type: "json_schema", schema: JUDGE_SCHEMA } },
+          messages: [
+            { role: "user", content: judgeUserText(it.actual_output, it.known_good, ctx.ruleText, ctx.knowledge) },
+          ],
+        },
+  }));
+
+  const batch = await client.messages.batches.create({ requests });
+  return batch.id;
+}
+
+/**
+ * Poll a batch. While still processing → { status: 'grading' }. Once ended →
+ * { status: 'done', results: Map<golden_case_id, gradeFields> }.
+ */
+export async function fetchBatchResultsViaClaude(batchId, threshold) {
+  const client = new Anthropic();
+  const batch = await client.messages.batches.retrieve(batchId);
+  if (batch.processing_status !== "ended") return { status: "grading" };
+
+  const results = new Map();
+  for await (const entry of await client.messages.batches.results(batchId)) {
+    const id = entry.custom_id;
+    if (entry.result?.type !== "succeeded") {
+      results.set(id, { decided_by: "llm_judge", note: "batch grading failed for this case" });
+      continue;
+    }
+    const text = (entry.result.message.content || [])
+      .filter((b) => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      results.set(id, { decided_by: "llm_judge", note: "unparseable batch result" });
+      continue;
+    }
+
+    if (parsed.overall_score != null || Array.isArray(parsed.scores)) {
+      const scoresObj = {};
+      for (const s of parsed.scores ?? []) scoresObj[s.criterion] = s.score;
+      const overall = Number(parsed.overall_score ?? 0);
+      const breakdown = (parsed.scores ?? []).map((s) => `${s.criterion} ${s.score}`).join(", ");
+      results.set(id, {
+        verdict: overall >= (threshold ?? 70) ? "pass" : "fail",
+        score: overall,
+        scores: scoresObj,
+        decided_by: "llm_judge",
+        note: `[${overall}/100, threshold ${threshold ?? 70}] ${parsed.summary ?? ""}${breakdown ? ` — ${breakdown}` : ""}`.trim(),
+      });
+    } else {
+      results.set(id, {
+        verdict: parsed.verdict === "pass" ? "pass" : "fail",
+        decided_by: "llm_judge",
+        note: `[${parsed.confidence ?? "low"} confidence] ${(parsed.rationale ?? "").trim()}`.trim(),
+      });
+    }
+  }
+  return { status: "done", results };
+}
+
 // --- Synthetic golden-case generation --------------------------------------
 // AI PROPOSES candidate cases; a human reviews/edits/approves before any are
 // saved (the route returns them unsaved). The model must support structured

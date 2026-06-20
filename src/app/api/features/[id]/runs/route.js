@@ -4,8 +4,11 @@ import {
   isMachineCheckable,
   judgeByLLM,
   judgeMultiByLLM,
+  submitJudgeBatch,
   suggestPossibleFailure,
 } from "@/lib/grading";
+
+const BATCH_THRESHOLD = 50; // judge runs larger than this go async via Batches
 
 // GET /api/features/:id/runs — list runs for this feature (newest first)
 export async function GET(_request, { params }) {
@@ -15,7 +18,7 @@ export async function GET(_request, { params }) {
 
   const { data, error } = await auth.supabase
     .from("run")
-    .select("id, label, created_at")
+    .select("id, label, created_at, status")
     .eq("feature_id", id)
     .order("created_at", { ascending: false });
 
@@ -67,7 +70,56 @@ export async function POST(request, { params }) {
 
   const knownGoodById = new Map((cases ?? []).map((c) => [c.id, c.known_good]));
 
-  // Create the run.
+  // Large judge runs grade asynchronously via the Anthropic Batches API: create
+  // the run in a 'grading' state with placeholder grades and return immediately;
+  // the /runs/:id/status poll writes the verdicts once the batch ends. Falls
+  // through to synchronous grading if the batch can't be submitted.
+  const fuzzyJudge = !isMachineCheckable(rules) && graderMode === "judge";
+  if (fuzzyJudge && outputs.length > BATCH_THRESHOLD && process.env.ANTHROPIC_API_KEY) {
+    const items = outputs.map((o) => ({
+      golden_case_id: o.golden_case_id,
+      actual_output: o.actual_output ?? "",
+      known_good: knownGoodById.get(o.golden_case_id),
+    }));
+    let batchId = null;
+    try {
+      batchId = await submitJudgeBatch(items, { ruleText, knowledge, criteria, threshold });
+    } catch {
+      batchId = null; // fall through to sync
+    }
+    if (batchId) {
+      const { data: run, error: runErr } = await supabase
+        .from("run")
+        .insert({ feature_id: id, label: body.label ?? null, status: "grading", batch_id: batchId })
+        .select("id, label, created_at, status")
+        .single();
+      if (runErr) return badRequest(runErr.message);
+
+      const placeholders = items.map((it) => ({
+        run_id: run.id,
+        golden_case_id: it.golden_case_id,
+        actual_output: it.actual_output,
+        verdict: null,
+        decided_by: "llm_judge",
+        note: "grading…",
+      }));
+      for (let k = 0; k < placeholders.length; k += 500) {
+        const { error } = await supabase.from("grade").insert(placeholders.slice(k, k + 500));
+        if (error) return badRequest(error.message);
+      }
+
+      return ok(
+        {
+          run_id: run.id,
+          status: "grading",
+          summary: { pass: 0, fail: 0, pending: items.length, total: items.length },
+        },
+        201,
+      );
+    }
+  }
+
+  // Create the run (synchronous grading path).
   const { data: run, error: runErr } = await supabase
     .from("run")
     .insert({ feature_id: id, label: body.label ?? null })

@@ -292,6 +292,26 @@ export async function generateCases(count, knowledge, ruleText, rules, seeds) {
   }
 }
 
+/**
+ * Submit a judge run as an Anthropic Message Batch (async). Returns the batch id,
+ * or null if no provider is configured. Server-only (dynamic import).
+ */
+export async function submitJudgeBatch(items, ctx) {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  const { submitJudgeBatchViaClaude } = await import("./grading-claude.js");
+  return submitJudgeBatchViaClaude(items, ctx);
+}
+
+/**
+ * Poll a batch. { status: 'grading' } while processing, else
+ * { status: 'done', results: Map }.
+ */
+export async function fetchBatchResults(batchId, threshold) {
+  if (!process.env.ANTHROPIC_API_KEY) return { status: "error" };
+  const { fetchBatchResultsViaClaude } = await import("./grading-claude.js");
+  return fetchBatchResultsViaClaude(batchId, threshold);
+}
+
 // --- Text-similarity helpers (deterministic, no provider) ------------------
 
 function tokenize(s) {
