@@ -64,11 +64,14 @@ What's built today:
 - **Multi-user auth** — separate email/password **sign-in** (`/login`) and **sign-up** (`/signup`) pages plus **password recovery** (`/forgot-password` → emailed link → `/reset-password`), backed by **Supabase Auth** with cookie sessions that work across Server Components, Server Actions, and the routing proxy.
 - **Protected routes** — `/dashboard` and its sub-routes are guarded in `src/proxy.js` (unauthenticated requests redirect to `/login`) and again in the layout as defense in depth; authenticated users hitting `/login` are bounced to `/dashboard`.
 - **Dashboard** — a sidebar + sticky-header shell (the shadcn `dashboard-01` layout, rebuilt natively on `base-nova`) with KPI cards, a pass-rate-by-run chart (recharts), and a features table.
-- **Feature workspace** — per feature, the five-tab flow **Golden Set → Rubric → Run → Results → Compare** (`src/app/dashboard/[featureId]/feature-workspace.jsx`).
-- **Grading engine** — deterministic machine rules decide where they can (`decided_by: rule`); for fuzzy cases the rubric's grader mode either has the AI **suggest** a possible failure for a human to confirm (`llm_suggested`, verdict pending) or **judge** pass/fail (`llm_judge`, human-overridable). Uses the Anthropic SDK when `ANTHROPIC_API_KEY` is set, with a key-free heuristic fallback.
+- **Feature workspace** — per feature, the seven-tab flow **Knowledge → Golden Set → Rubric → Run → Results → Compare → Quick test** (`src/app/dashboard/[featureId]/feature-workspace.jsx`).
+- **Knowledge** — a per-feature reference doc (e.g. brand guidelines) edited before the golden set and injected into every AI grading prompt as `SOURCE / REFERENCE`; machine rules ignore it.
+- **Grading engine** — deterministic machine rules decide where they can (`decided_by: rule`), including text-similarity rules (`rouge_l`, `jaccard`) measured against the known-good. For fuzzy cases the rubric's grader mode either has the AI **suggest** a possible failure for a human to confirm (`llm_suggested`, verdict pending) or **judge** pass/fail (`llm_judge`, human-overridable) — and in judge mode with **criteria**, scores each dimension 0–100 plus an overall vs a pass threshold. Uses the Anthropic SDK when `ANTHROPIC_API_KEY` is set, with a key-free heuristic fallback.
+- **Quick test** — grade any ad-hoc **text or image** against the rubric + knowledge (no run / golden case needed), saved to a per-feature history. A **Stability** check grades the same input N times to measure the AI's consistency (verdict agreement + score variance). Images go through a vision judge.
+- **Confusion matrix & metrics** — Results draws a machine-vs-human matrix (false-pass / false-fail) with Accuracy / Precision / Recall / F1, using the preserved machine verdict (`grade.auto_verdict`) as the prediction and the human override as ground truth.
 - **Onboarding walkthrough** — a driver.js spotlight tour that runs on first login and is replayable.
 - **Theming** — light / dark / system via `next-themes`, toggled from a header button.
-- **Starter feature** — every new account is auto-provisioned a **Brand Rulebook Checker** example (golden set + rubric) via a Supabase signup trigger, so the dashboard isn't empty.
+- **Starter features** — every new account is auto-provisioned a **Brand Rulebook Checker** and a **Madarth Brand Compliance** example (golden set + rubric, the latter with a Knowledge doc) via a Supabase signup trigger, so the dashboard isn't empty.
 - **UI kit** — the full **shadcn/ui** component set (55 components, `base-nova` style, neutral base color).
 
 ### Routes
@@ -83,7 +86,7 @@ What's built today:
 | `/auth/callback`       | Dynamic | Exchanges the email link's code for a session, then redirects         |
 | `/dashboard`           | Dynamic | Protected — KPI cards, pass-rate chart, and the features table        |
 | `/dashboard/new`       | Dynamic | Create a feature                                                      |
-| `/dashboard/[id]`      | Dynamic | A feature's workspace (Golden Set / Rubric / Run / Results / Compare) |
+| `/dashboard/[id]`      | Dynamic | A feature's workspace (Knowledge / Golden Set / Rubric / Run / Results / Compare / Quick test) |
 
 ### Auth flow
 
@@ -150,9 +153,13 @@ npm run build          # production build
 npm run start          # serve the production build
 npm run lint           # eslint
 npm run verify         # verify-the-verifier: grader reproduces known Move 1 verdicts
+npm run brand:madarth  # run the Madarth brand rules over sample copy
+npm run uat            # simulated before→fix→after through the real engine
 ```
 
-Visit `http://localhost:3000/dashboard` → you'll be redirected to `/login`. Create an account, sign in, then: **create a feature → add golden cases → write a rubric → run → see results → compare two runs.**
+Visit `http://localhost:3000/dashboard` → you'll be redirected to `/login`. Create an account, sign in, then: **(optionally add Knowledge) → add golden cases → write a rubric → run → see results → compare two runs**, or use **Quick test** for an ad-hoc check.
+
+> **Database schema** lives in `supabase/migrations/` (vendored from the project's Supabase migration history). On a fresh Supabase project, apply it with the Supabase CLI (`supabase db push`) or by running the SQL files in order.
 
 ## Repository structure
 
@@ -175,7 +182,11 @@ Visit `http://localhost:3000/dashboard` → you'll be redirected to `/login`. Cr
 │   ├── summary.md                Executive summary across all evaluations
 │   └── user-1.md … user-4.md     Move 1 — per-builder eval records
 ├── scripts/
-│   └── verify-grading.mjs       Verify-the-verifier (npm run verify)
+│   ├── verify-grading.mjs       Verify-the-verifier (npm run verify)
+│   ├── madarth-brand-check.mjs  Madarth brand rules over sample copy (npm run brand:madarth)
+│   └── uat-simulation.mjs       Simulated before→fix→after (npm run uat)
+├── supabase/
+│   └── migrations/             Vendored DB schema (init → multi-criteria scores)
 ├── public/                     Static assets
 └── src/
     ├── app/
@@ -191,8 +202,9 @@ Visit `http://localhost:3000/dashboard` → you'll be redirected to `/login`. Cr
     │   │   ├── page.js           Overview: KPI cards, chart, features table
     │   │   ├── new/              Create-feature page + form
     │   │   └── [featureId]/      feature-workspace.jsx (the 5 tabs)
-    │   └── api/                  Route handlers: features, golden-cases (+delete),
-    │                               rubric, runs (+delete), grades, compare
+    │   └── api/                  Route handlers: features (+[id] GET/PATCH knowledge),
+    │                               golden-cases (+delete), rubric, runs (+delete),
+    │                               grades, compare, quick-test (+GET/DELETE), stability
     ├── proxy.js                  Session refresh + route guards
     ├── components/
     │   ├── app-sidebar / nav-user / site-header   Dashboard shell
@@ -203,8 +215,8 @@ Visit `http://localhost:3000/dashboard` → you'll be redirected to `/login`. Cr
     │   └── ui/                   55 shadcn/ui components
     ├── hooks/use-mobile.js
     └── lib/
-        ├── grading.js            Grading engine (rules + AI suggest/judge)
-        ├── grading-claude.js     Anthropic calls for suggest/judge (server-only)
+        ├── grading.js            Grading engine (rules + similarity + AI suggest/judge/multi-criteria)
+        ├── grading-claude.js     Anthropic calls: suggest / judge / multi-criteria / vision (server-only)
         ├── api.js                requireUser() + JSON helpers for routes
         ├── site-url.js           Public origin for auth redirect links
         ├── tours.js              Walkthrough step definitions

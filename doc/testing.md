@@ -8,11 +8,11 @@
 | --- | --- | --- |
 | Frontend | Next.js 16 (App Router) + shadcn/ui | `src/app/dashboard/**` |
 | API | Next.js route handlers | `src/app/api/**` |
-| Grading engine | Plain JS rules + AI suggest/judge | `src/lib/grading.js` |
-| Database | Supabase Postgres + RLS | Supabase project (Postgres + RLS) |
+| Grading engine | JS rules + similarity + AI suggest / judge / multi-criteria / vision | `src/lib/grading.js`, `src/lib/grading-claude.js` |
+| Database | Supabase Postgres + RLS (schema vendored in `supabase/migrations/`) | Supabase project (Postgres + RLS) |
 | Auth | Supabase Auth (cookie sessions) | `src/lib/supabase/**`, `src/proxy.js` |
 
-Screens: **My Features → Golden Set → Rubric → Run → Results → Compare**, all under the auth-guarded `/dashboard`.
+Screens: **My Features →** per feature **Knowledge → Golden Set → Rubric → Run → Results → Compare → Quick test**, all under the auth-guarded `/dashboard`.
 
 ## Verify the Verifier (run before trusting it)
 
@@ -73,6 +73,13 @@ Q8 was executed (`npm run verify`). Q1–Q7 and Q9–Q12 were verified on 2026-0
 | Q10 | Confirm/override a grade in Results | verdict set, `decided_by` → `human` | ✅ `PATCH /api/grades/[id]` sets `decided_by human` |
 | Q11 | Save rubric with an invalid rule shape | rejected (400) | ✅ `validateRules` → `badRequest` (400) |
 | Q12 | Delete a golden case / run | row and its grades removed | ✅ DELETE drops grades then the row |
+| Q13 | Save a Knowledge doc | stored on `feature`, fed to the AI grader | ✅ `PATCH /api/features/[id]`; live AI cites it |
+| Q14 | Similarity rule (`rouge_l` / `jaccard`) | FAIL below threshold vs known-good | ✅ unit-checked against `grading.js` |
+| Q15 | Judge with criteria | per-criterion 0–100 + overall vs `pass_threshold` | ✅ live multi-criteria call (on-brand 81 pass / off-brand 0 fail) |
+| Q16 | Quick test (text) | graded + logged to history | ✅ `POST /api/features/[id]/quick-test` inserts; GET lists |
+| Q17 | Quick test (image) | vision judge verdict | ✅ image path → `judgeImageByLLM` |
+| Q18 | Override → confusion matrix | machine vs human + Accuracy/Precision/Recall/F1 | ✅ `grade.auto_verdict` preserved; Results computes |
+| Q19 | Stability check | % stable + score variance over N runs | ✅ live 5× run, 100% stable on a clear case |
 
 ### Security
 
@@ -105,10 +112,11 @@ Row Level Security isolates every builder's data per user — see [domain-model.
 ## Submit Checklist
 
 - [x] Auth (login) working
-- [x] API: features / cases / rubric / runs / compare / grades
-- [x] Grading engine (rules + AI suggest/judge)
-- [x] Frontend through Results + Compare
+- [x] API: features (+knowledge) / cases / rubric / runs / compare / grades / quick-test / stability
+- [x] Grading engine (rules + similarity + AI suggest / judge / multi-criteria / vision)
+- [x] Frontend through Knowledge → Results + Compare + Quick test
 - [x] Verify-the-verifier passes (`npm run verify`)
+- [x] DB schema vendored to `supabase/migrations/`
 - [ ] Two real builders run it (one cold) → before/change/after captured — **simulated only** (`scripts/uat-simulation.mjs`); real sessions still pending
 - [x] The surprise written down (from the simulation; confirm in a live session)
 - [ ] Final commit + submit
