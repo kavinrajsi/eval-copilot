@@ -46,6 +46,8 @@ erDiagram
       uuid feature_id FK
       uuid owner_id FK
       text label
+      text status "done | grading (async batch)"
+      text batch_id "Anthropic Message Batch id"
     }
     grade {
       uuid id PK
@@ -111,6 +113,25 @@ Three additions sit alongside the core grade loop:
 - **`feature.knowledge`** — a per-feature reference document (e.g. brand guidelines) edited in the **Knowledge** tab, before the golden set. It's threaded into every AI grading prompt as context; machine rules ignore it.
 - **`quick_test`** — an ad-hoc, saved check: grade one piece of **text or an image** against the rubric + knowledge without a run or golden case. Images go through a vision judge (machine rules can't see pixels). Each test is logged with its verdict / score / note. A **Stability** check on the same screen grades one input N times to measure the AI's consistency (verdict agreement + score variance) — reliability, not accuracy.
 - **`grade.auto_verdict`** — captured at grade time, it preserves the machine's verdict so a later human override doesn't erase it. Results uses it to draw a **machine-vs-human confusion matrix** (false-pass / false-fail) plus Accuracy / Precision / Recall / F1. Ground truth is the human verdict, so the matrix covers human-reviewed cases only.
+
+## Scaling to large golden sets
+
+The golden set is built to reach thousands of cases:
+
+- **Bulk import / export** — golden cases import from CSV (`input,known_good`) or JSON and
+  export the same way (`GET /golden-cases/export`); inserts and reads are chunked/paginated
+  (`?limit/&offset` + an exact total). `src/lib/csv.js` does the parsing.
+- **Synthetic generation** — `POST /golden-cases/generate` has Claude draft candidate cases
+  from the feature's `knowledge` + rubric; they're returned **unsaved** for a human to
+  review/edit/approve (the mirror guardrail — the AI never commits its own answer key).
+- **Runs at scale** — outputs can be imported as CSV (`input,actual_output`, matched by
+  `input`); grading runs with bounded concurrency and chunked inserts. A judge run over ~50
+  fuzzy cases grades **asynchronously** via the Anthropic **Message Batches API**: the run is
+  created with `status: 'grading'` + `batch_id` and placeholder grades, and
+  `GET /runs/:id/status` writes the verdicts and flips `status` to `done` once the batch ends
+  (it falls back to synchronous grading if a batch can't be submitted).
+- **Aggregates** use `count` queries (per feature / per run) so the dashboard never pulls
+  thousands of case/grade rows.
 
 ## The Run-to-Run Comparison Keys
 

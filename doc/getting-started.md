@@ -46,10 +46,15 @@ In the **Knowledge** tab (the first one, before the golden set):
 In the **Golden Set** tab:
 
 1. For each case, enter the **Input / brief** and the **Known-good answer** (what a correct output looks like).
-2. Click **Add case**. Aim for ~5 cases that cover your real failure risks, not just easy wins.
-3. Use **Delete** to remove a case that's wrong.
+2. Click **Add case**. Aim for cases that cover your real failure risks, not just easy wins.
+3. Use **Delete** to remove a case that's wrong. The table is **paginated** (50/page) with a live count.
 
-> This is the answer key. Writing it *before* you see any output is what keeps the eval honest — you can't grade against a target you invented after the fact.
+**At scale** — three ways to build a large set:
+- **Import** a CSV (`input,known_good` header) or JSON (`[{ input, known_good }]`); rows insert in chunks.
+- **Export** the set as CSV or JSON anytime.
+- **Generate cases (AI draft)** — the AI drafts candidates from this feature's Knowledge + rubric. **Review and edit each before saving** (checkboxes → Save selected). An answer key the AI wrote *and* grades is a mirror, not a test — the human-approval step is the guardrail.
+
+> This is the answer key. Writing (or approving) it *before* you see any output is what keeps the eval honest — you can't grade against a target you invented after the fact.
 
 ## Step 5 — Write the Rubric (what the computer checks)
 
@@ -79,11 +84,13 @@ In the **Rubric** tab:
 In the **Run** tab:
 
 1. Optionally label the run (e.g. "v1 — before fix").
-2. Paste your AI feature's **actual output** for each case.
+2. Provide your AI feature's **actual output** per case — paste it (small sets, ≤50 cases) or **import a CSV** (`input,actual_output`, matched to cases by `input`) for large sets.
 3. Click **Grade run**. You'll get a summary — **X pass / Y fail / Z needs review** — and a per-case verdict table.
    - With machine rules → each case is graded **by rule** instantly.
    - Judge mode → each case comes back with a real pass/fail (and, with criteria, an overall **NN/100** score), overridable.
    - Suggest mode → cases come back **"Needs review"** with an AI hint for a human to confirm.
+
+> **Large judge runs (50+ fuzzy cases)** grade **in the background** via an async batch (cheaper, no timeouts). The run shows as *grading…* — open Results, pick it, and click **Check status**; verdicts appear when the batch finishes.
 
 ## Step 7 — Review & confirm (Results)
 
@@ -92,8 +99,9 @@ In the **Results** tab:
 1. Pick a run from the dropdown.
 2. Each row shows the verdict (and score, if scored), **who decided it** (`rule` / `llm_judge` / `llm_suggested` / `human`), and a note.
 3. For "Needs review" cases — or any call you disagree with — click **Pass** or **Fail** to set the human verdict (it becomes `decided_by: human`).
-4. As you override, a **confusion matrix** appears: machine verdict vs your (human) verdict over reviewed cases, with the **false-pass** cell flagged and **Accuracy / Precision / Recall / F1** — so you can see where the grader itself is wrong, not just the feature.
-5. **Delete run** here if you want to redo it.
+4. As you override, a **confusion matrix** appears: machine verdict vs your (human) verdict over reviewed cases, with the **false-pass** cell flagged and **Accuracy / Precision / Recall / F1** — so you can see where the grader itself is wrong, not just the feature. The grade table is **paginated**; the matrix is computed from the full reviewed set, not just the page.
+5. If the run is still **grading…** (a background batch), click **Check status** to pull verdicts when it's done.
+6. **Delete run** here if you want to redo it.
 
 ## Step 8 — Fix, re-run, and Compare
 
@@ -131,6 +139,8 @@ npm run uat             # simulated before→fix→after through the real engine
 | Add a feature to evaluate | Sidebar | **New feature** |
 | Give the grader context | Knowledge tab | paste reference → **Save knowledge** |
 | Record what "good" looks like | Golden Set tab | **Add case** |
+| Build a large golden set | Golden Set tab | **Import** CSV/JSON, or **Generate cases** → Save selected |
+| Grade many outputs at once | Run tab | **Import outputs (CSV)** |
 | Define grading rules + criteria | Rubric tab | add rules / criteria → **Save rubric** |
 | Grade outputs | Run tab | paste outputs → **Grade run** |
 | Confirm verdicts & see false-pass rate | Results tab | **Pass** / **Fail** → confusion matrix |

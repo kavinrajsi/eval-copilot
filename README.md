@@ -69,6 +69,7 @@ What's built today:
 - **Grading engine** — deterministic machine rules decide where they can (`decided_by: rule`), including text-similarity rules (`rouge_l`, `jaccard`) measured against the known-good. For fuzzy cases the rubric's grader mode either has the AI **suggest** a possible failure for a human to confirm (`llm_suggested`, verdict pending) or **judge** pass/fail (`llm_judge`, human-overridable) — and in judge mode with **criteria**, scores each dimension 0–100 plus an overall vs a pass threshold. Uses the Anthropic SDK when `ANTHROPIC_API_KEY` is set, with a key-free heuristic fallback.
 - **Quick test** — grade any ad-hoc **text or image** against the rubric + knowledge (no run / golden case needed), saved to a per-feature history. A **Stability** check grades the same input N times to measure the AI's consistency (verdict agreement + score variance). Images go through a vision judge.
 - **Confusion matrix & metrics** — Results draws a machine-vs-human matrix (false-pass / false-fail) with Accuracy / Precision / Recall / F1, using the preserved machine verdict (`grade.auto_verdict`) as the prediction and the human override as ground truth.
+- **Large golden sets** — bulk **import/export** (CSV/JSON), chunked inserts, and a paginated Golden Set; **synthetic generation** (the AI drafts candidate cases from Knowledge + rubric for a human to review/edit/approve — never auto-saved). Runs scale too: **CSV output import**, bounded-concurrency grading, and large judge runs graded **asynchronously** via the Anthropic Message Batches API (`run.status` / `batch_id`, polled by `/runs/[id]/status`). Dashboard tallies use `count` queries.
 - **Onboarding walkthrough** — a driver.js spotlight tour that runs on first login and is replayable.
 - **Theming** — light / dark / system via `next-themes`, toggled from a header button.
 - **Starter features** — every new account is auto-provisioned a **Brand Rulebook Checker** and a **Madarth Brand Compliance** example (golden set + rubric, the latter with a Knowledge doc) via a Supabase signup trigger, so the dashboard isn't empty.
@@ -203,8 +204,9 @@ Visit `http://localhost:3000/dashboard` → you'll be redirected to `/login`. Cr
     │   │   ├── new/              Create-feature page + form
     │   │   └── [featureId]/      feature-workspace.jsx (the 5 tabs)
     │   └── api/                  Route handlers: features (+[id] GET/PATCH knowledge),
-    │                               golden-cases (+delete), rubric, runs (+delete),
-    │                               grades, compare, quick-test (+GET/DELETE), stability
+    │                               golden-cases (+delete, export, generate), rubric,
+    │                               runs (+delete), runs/[id]/status, grades, compare,
+    │                               quick-test (+GET/DELETE), stability
     ├── proxy.js                  Session refresh + route guards
     ├── components/
     │   ├── app-sidebar / nav-user / site-header   Dashboard shell
@@ -215,8 +217,9 @@ Visit `http://localhost:3000/dashboard` → you'll be redirected to `/login`. Cr
     │   └── ui/                   55 shadcn/ui components
     ├── hooks/use-mobile.js
     └── lib/
-        ├── grading.js            Grading engine (rules + similarity + AI suggest/judge/multi-criteria)
-        ├── grading-claude.js     Anthropic calls: suggest / judge / multi-criteria / vision (server-only)
+        ├── grading.js            Grading engine (rules + similarity + AI suggest/judge/multi-criteria + generation/batch wrappers)
+        ├── grading-claude.js     Anthropic calls: suggest / judge / multi-criteria / vision / generate / batches (server-only)
+        ├── csv.js                CSV parse/stringify for golden-case import/export
         ├── api.js                requireUser() + JSON helpers for routes
         ├── site-url.js           Public origin for auth redirect links
         ├── tours.js              Walkthrough step definitions

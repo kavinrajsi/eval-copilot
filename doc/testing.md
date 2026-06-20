@@ -80,6 +80,11 @@ Q8 was executed (`npm run verify`). Q1–Q7 and Q9–Q12 were verified on 2026-0
 | Q17 | Quick test (image) | vision judge verdict | ✅ image path → `judgeImageByLLM` |
 | Q18 | Override → confusion matrix | machine vs human + Accuracy/Precision/Recall/F1 | ✅ `grade.auto_verdict` preserved; Results computes |
 | Q19 | Stability check | % stable + score variance over N runs | ✅ live 5× run, 100% stable on a clear case |
+| Q20 | Import golden cases (CSV/JSON) | rows inserted in chunks; malformed skipped | ✅ chunked POST; `csv.js` parse unit-checked |
+| Q21 | Export golden cases | CSV/JSON download | ✅ `GET /golden-cases/export` |
+| Q22 | Generate cases (AI) | candidates returned unsaved; saved only on approval | ✅ live gen (6 on-brand); `/generate` saves nothing |
+| Q23 | Run from outputs CSV | matched to cases by input; graded in chunks | ✅ runs route chunked insert + bounded concurrency |
+| Q24 | Large judge run (50+) | grades async via Batches; status → done | ⚠️ structure verified; needs a live batch run to confirm |
 
 ### Security
 
