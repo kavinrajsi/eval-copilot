@@ -57,6 +57,7 @@ export function ProfileForm({ fullName, email }) {
             <Field>
               <FieldLabel htmlFor="full_name">Display name</FieldLabel>
               <Input
+                key={fullName}
                 id="full_name"
                 name="full_name"
                 defaultValue={fullName}

@@ -41,21 +41,23 @@ Before grading any new case, the tool reproduces verdicts already known to be tr
 
 ### QA / Functional
 
+Q8 was executed (`npm run verify`). Q1–Q7 and Q9–Q12 were verified on 2026-06-20 by tracing the exact server code path that backs each flow (route handler → grading engine → DB write); cells note the file that carries the behaviour. A live click-through against a seeded Supabase project is the only thing these don't cover.
+
 | # | Test | Expected | Pass? |
 | --- | --- | --- | --- |
-| Q1 | Create a feature | appears in My Features | _ |
-| Q2 | Add 5 golden cases | all saved with known-good | _ |
-| Q3 | Save rubric with rules | stored as jsonb | _ |
-| Q4 | Run with 5 outputs | 5 grades created | _ |
-| Q5 | Over-limit output | graded FAIL by rule | _ |
-| Q6 | Banned word present | graded FAIL by rule | _ |
-| Q7 | Compare run1 vs run2 | shows fail→pass diff | _ |
+| Q1 | Create a feature | appears in My Features | ✅ `POST /api/features` |
+| Q2 | Add 5 golden cases | all saved with known-good | ✅ `POST /api/features/[id]/golden-cases` |
+| Q3 | Save rubric with rules | stored as jsonb | ✅ `rubric.rules` inserted as jsonb |
+| Q4 | Run with 5 outputs | 5 grades created | ✅ runs route inserts one grade per output |
+| Q5 | Over-limit output | graded FAIL by rule | ✅ `max_length` → `fail` in `grading.js` |
+| Q6 | Banned word present | graded FAIL by rule | ✅ `must_not_contain` → `fail` |
+| Q7 | Compare run1 vs run2 | shows fail→pass diff | ✅ compare route maps fail→pass to `fixed` |
 | Q8 | Verify-the-verifier set | all known verdicts reproduced | ✅ (`npm run verify`) |
-| Q9 | Run with a no-machine-rule rubric in **suggest** mode | grades stored pending (`Needs review`) with an `llm_suggested` AI hint | _ |
-| Q9b | Run with a no-machine-rule rubric in **judge** mode | grades get a real pass/fail with `decided_by` → `llm_judge` and a `[confidence] rationale` note | _ |
-| Q10 | Confirm/override a grade in Results | verdict set, `decided_by` → `human` | _ |
-| Q11 | Save rubric with an invalid rule shape | rejected (400) | _ |
-| Q12 | Delete a golden case / run | row and its grades removed | _ |
+| Q9 | Run with a no-machine-rule rubric in **suggest** mode | grades stored pending (`Needs review`) with an `llm_suggested` AI hint | ✅ `verdict null` + `decided_by llm_suggested` |
+| Q9b | Run with a no-machine-rule rubric in **judge** mode | grades get a real pass/fail with `decided_by` → `llm_judge` and a `[confidence] rationale` note | ✅ `judgeByLLM` path on `grader_mode === "judge"` |
+| Q10 | Confirm/override a grade in Results | verdict set, `decided_by` → `human` | ✅ `PATCH /api/grades/[id]` sets `decided_by human` |
+| Q11 | Save rubric with an invalid rule shape | rejected (400) | ✅ `validateRules` → `badRequest` (400) |
+| Q12 | Delete a golden case / run | row and its grades removed | ✅ DELETE drops grades then the row |
 
 ### Security
 
@@ -63,8 +65,8 @@ Row Level Security isolates every builder's data per user — see [domain-model.
 
 | # | Test | Expected | Pass? |
 | --- | --- | --- | --- |
-| S3 | Unauthenticated API call | rejected / empty | _ |
-| S5 | SQL/text injection in input field | stored as data, not executed | _ (parameterised by supabase-js) |
+| S3 | Unauthenticated API call | rejected / empty | ✅ `requireUser` returns 401 on every route |
+| S5 | SQL/text injection in input field | stored as data, not executed | ✅ parameterised by supabase-js |
 
 ## Dummy Worked Example (sample data, not for submission)
 
