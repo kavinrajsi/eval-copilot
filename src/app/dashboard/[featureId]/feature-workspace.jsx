@@ -90,6 +90,7 @@ export default function FeatureWorkspace({ featureId }) {
         <TabsTrigger value="run">Run</TabsTrigger>
         <TabsTrigger value="results">Results</TabsTrigger>
         <TabsTrigger value="compare">Compare</TabsTrigger>
+        <TabsTrigger value="quick-test">Quick test</TabsTrigger>
       </TabsList>
 
       <TabsContent value="golden">
@@ -106,6 +107,9 @@ export default function FeatureWorkspace({ featureId }) {
       </TabsContent>
       <TabsContent value="compare">
         <Compare base={base} runs={runs} />
+      </TabsContent>
+      <TabsContent value="quick-test">
+        <QuickTest base={base} rubric={rubric} />
       </TabsContent>
     </Tabs>
   );
@@ -649,6 +653,90 @@ function Compare({ base, runs }) {
               </TableBody>
             </Table>
           </>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- Quick test -----------------------------------------------------------
+
+// Grade arbitrary content against the rubric without creating a run or needing
+// a golden case. Nothing is saved — it's a throwaway brand/rule check.
+function QuickTest({ base, rubric }) {
+  const [content, setContent] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const machine = isMachineCheckable(rubric?.rules ?? []);
+
+  async function test(e) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const body = await jsonFetch(`${base}/quick-test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      });
+      setResult(body.result);
+    } catch (err) {
+      toast.error(`Test failed: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!rubric) {
+    return (
+      <Card>
+        <CardContent className="text-muted-foreground py-8 text-sm">
+          Save a rubric first, then test any content against it here.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Quick test</CardTitle>
+        <CardDescription>
+          Paste any content to grade it against this rubric — nothing is saved.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        {!machine ? (
+          <p className="text-muted-foreground rounded-md border border-dashed px-3 py-2 text-sm">
+            This rubric has no machine rules —{" "}
+            {rubric.grader_mode === "judge"
+              ? "the AI judges pass/fail."
+              : "the AI suggests a possible failure for a human to confirm."}
+          </p>
+        ) : null}
+        <form onSubmit={test} className="grid gap-3">
+          <div className="grid gap-2">
+            <Label>Content to test</Label>
+            <Textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              placeholder="Our premium ecosystem powers your brand journey."
+              required
+            />
+          </div>
+          <Button type="submit" disabled={busy || !content.trim()} className="justify-self-start">
+            {busy ? "Testing…" : "Test content"}
+          </Button>
+        </form>
+
+        {result ? (
+          <div className="grid gap-2 rounded-md border p-4">
+            <div className="flex items-center gap-2">
+              <Verdict value={result.verdict} />
+              <span className="text-muted-foreground text-xs">{result.decided_by}</span>
+            </div>
+            <p className="text-sm">{result.note ?? "No issue spotted by the machine rules."}</p>
+          </div>
         ) : null}
       </CardContent>
     </Card>
