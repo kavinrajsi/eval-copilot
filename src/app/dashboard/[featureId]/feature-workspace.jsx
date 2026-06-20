@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,17 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+
+// Fetch JSON and surface API/network errors instead of failing silently.
+// Throws on a non-2xx response so callers can toast and recover.
+async function jsonFetch(url, opts) {
+  const res = await fetch(url, opts);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body?.error || `Request failed (${res.status})`);
+  }
+  return body;
+}
 
 const RULE_TYPES = [
   "max_length",
@@ -44,14 +56,18 @@ export default function FeatureWorkspace({ featureId }) {
   const base = `/api/features/${featureId}`;
 
   const loadAll = useCallback(async () => {
-    const [c, r, ru] = await Promise.all([
-      fetch(`${base}/golden-cases`).then((x) => x.json()),
-      fetch(`${base}/rubric`).then((x) => x.json()),
-      fetch(`${base}/runs`).then((x) => x.json()),
-    ]);
-    setCases(c.golden_cases ?? []);
-    setRubric(r.rubric ?? null);
-    setRuns(ru.runs ?? []);
+    try {
+      const [c, r, ru] = await Promise.all([
+        jsonFetch(`${base}/golden-cases`),
+        jsonFetch(`${base}/rubric`),
+        jsonFetch(`${base}/runs`),
+      ]);
+      setCases(c.golden_cases ?? []);
+      setRubric(r.rubric ?? null);
+      setRuns(ru.runs ?? []);
+    } catch (e) {
+      toast.error(`Couldn't load this feature: ${e.message}`);
+    }
   }, [base]);
 
   useEffect(() => {
@@ -99,15 +115,20 @@ function GoldenSet({ base, cases, onChange }) {
   async function add(e) {
     e.preventDefault();
     setBusy(true);
-    await fetch(`${base}/golden-cases`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ input, known_good: knownGood }),
-    });
-    setBusy(false);
-    setInput("");
-    setKnownGood("");
-    onChange();
+    try {
+      await jsonFetch(`${base}/golden-cases`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input, known_good: knownGood }),
+      });
+      setInput("");
+      setKnownGood("");
+      onChange();
+    } catch (err) {
+      toast.error(`Couldn't add case: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -184,13 +205,18 @@ function Rubric({ base, rubric, onChange }) {
 
   async function save() {
     setBusy(true);
-    await fetch(`${base}/rubric`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rule_text: ruleText, rules }),
-    });
-    setBusy(false);
-    onChange();
+    try {
+      await jsonFetch(`${base}/rubric`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rule_text: ruleText, rules }),
+      });
+      onChange();
+    } catch (err) {
+      toast.error(`Couldn't save rubric: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   const needsValue = type !== "exact_match";
@@ -297,15 +323,19 @@ function RunPanel({ base, cases, onRun }) {
         actual_output: outputs[c.id] ?? "",
       })),
     };
-    const res = await fetch(`${base}/runs`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const body = await res.json();
-    setBusy(false);
-    setResult(body);
-    onRun();
+    try {
+      const body = await jsonFetch(`${base}/runs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setResult(body);
+      onRun();
+    } catch (err) {
+      toast.error(`Grading failed: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (!cases.length) {
@@ -387,20 +417,24 @@ function Results({ runs }) {
 
   useEffect(() => {
     if (!runId) return;
-    fetch(`/api/runs/${runId}/grades`)
-      .then((x) => x.json())
-      .then((b) => setGrades(b.grades ?? []));
+    jsonFetch(`/api/runs/${runId}/grades`)
+      .then((b) => setGrades(b.grades ?? []))
+      .catch((e) => toast.error(`Couldn't load grades: ${e.message}`));
   }, [runId]);
 
   async function override(id, verdict) {
-    await fetch(`/api/grades/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ verdict, note: "human override" }),
-    });
-    setGrades((prev) =>
-      prev.map((g) => (g.id === id ? { ...g, verdict, decided_by: "human" } : g)),
-    );
+    try {
+      await jsonFetch(`/api/grades/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ verdict, note: "human override" }),
+      });
+      setGrades((prev) =>
+        prev.map((g) => (g.id === id ? { ...g, verdict, decided_by: "human" } : g)),
+      );
+    } catch (e) {
+      toast.error(`Couldn't override verdict: ${e.message}`);
+    }
   }
 
   return (
@@ -467,8 +501,11 @@ function Compare({ base, runs }) {
   const [diff, setDiff] = useState(null);
 
   async function compare() {
-    const res = await fetch(`${base}/compare?run1=${run1}&run2=${run2}`);
-    setDiff(await res.json());
+    try {
+      setDiff(await jsonFetch(`${base}/compare?run1=${run1}&run2=${run2}`));
+    } catch (e) {
+      toast.error(`Compare failed: ${e.message}`);
+    }
   }
 
   const changeColor = {

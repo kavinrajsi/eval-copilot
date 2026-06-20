@@ -5,12 +5,25 @@ import { badRequest, ok, requireUser } from "@/lib/api";
 export async function GET(request, { params }) {
   const auth = await requireUser();
   if (auth.error) return auth.error;
-  await params; // feature id is implied by the runs; RLS scopes everything.
+  const { id } = await params;
 
   const { searchParams } = new URL(request.url);
   const run1 = searchParams.get("run1");
   const run2 = searchParams.get("run2");
   if (!run1 || !run2) return badRequest("run1 and run2 are required");
+
+  // RLS scopes by user; this additionally enforces the feature boundary so two
+  // runs from different features can't be compared.
+  const { data: runRows, error: runErr } = await auth.supabase
+    .from("run")
+    .select("id")
+    .eq("feature_id", id)
+    .in("id", [run1, run2]);
+  if (runErr) return badRequest(runErr.message);
+  const runIds = new Set((runRows ?? []).map((r) => r.id));
+  if (!runIds.has(run1) || !runIds.has(run2)) {
+    return badRequest("Both runs must belong to this feature");
+  }
 
   const { data, error } = await auth.supabase
     .from("grade")

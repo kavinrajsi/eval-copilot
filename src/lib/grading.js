@@ -22,7 +22,7 @@
  * @returns {{verdict: 'pass'|'fail', decided_by: 'rule', note?: string}}
  */
 export function gradeByRule(actual, knownGood, rules = []) {
-  const text = actual ?? "";
+  const text = String(actual ?? "");
 
   for (const rule of rules) {
     switch (rule.type) {

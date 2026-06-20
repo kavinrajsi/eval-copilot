@@ -19,7 +19,7 @@ export async function authenticate(prevState, formData) {
     if (error) return { error: error.message };
 
     // When email confirmation is enabled, no session is returned yet.
-    if (!data.session) {
+    if (!data?.session) {
       return { message: "Check your email to confirm your account." };
     }
   } else {
