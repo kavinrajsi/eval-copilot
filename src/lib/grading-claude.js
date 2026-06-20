@@ -194,6 +194,95 @@ export async function judgeMultiViaClaude(actual, knownGood, ruleText, knowledge
   };
 }
 
+// --- Synthetic golden-case generation --------------------------------------
+// AI PROPOSES candidate cases; a human reviews/edits/approves before any are
+// saved (the route returns them unsaved). The model must support structured
+// output — same convention as the judges (Haiku default, ANTHROPIC_SUGGEST_MODEL).
+
+const GENERATE_SYSTEM = `You generate evaluation test cases for an AI feature.
+
+Each case is a realistic INPUT (the brief/prompt the feature would receive) plus the KNOWN-GOOD answer a careful human reviewer would commit to in advance. Produce DIVERSE cases that probe real failure risks and edge cases — not just easy wins — grounded in the SOURCE / REFERENCE and the rubric when provided. Do not produce duplicates or trivial variations of each other or of inputs already listed.`;
+
+const GENERATE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    cases: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          input: { type: "string" },
+          known_good: { type: "string" },
+        },
+        required: ["input", "known_good"],
+      },
+    },
+  },
+  required: ["cases"],
+};
+
+/**
+ * Generate up to `count` candidate golden cases. Loops in small batches, telling
+ * the model which inputs already exist so it doesn't repeat. Returns an array of
+ * { input, known_good } — never saved here.
+ */
+export async function generateCasesViaClaude(count, knowledge, ruleText, rules, seeds) {
+  const client = new Anthropic();
+  const want = Math.min(200, Math.max(1, Math.round(count) || 10));
+  const BATCH = 20;
+  const seen = new Set();
+  const out = [];
+  let guard = 0;
+
+  while (out.length < want && guard < 25) {
+    guard++;
+    const ask = Math.min(BATCH, want - out.length);
+    const existing = out.slice(-30).map((c) => c.input);
+
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 4096,
+      system: GENERATE_SYSTEM,
+      output_config: { format: { type: "json_schema", schema: GENERATE_SCHEMA } },
+      messages: [
+        {
+          role: "user",
+          content: `${sourceBlock(knowledge)}RUBRIC:\n${ruleText || "(none provided)"}\n\nMACHINE RULES:\n${JSON.stringify(rules ?? [])}\n\n${seeds ? `SEED EXAMPLES:\n${seeds}\n\n` : ""}${existing.length ? `ALREADY GENERATED (do not repeat these inputs):\n${existing.join("\n")}\n\n` : ""}Generate ${ask} NEW, diverse test cases.`,
+        },
+      ],
+    });
+
+    const text = response.content
+      .filter((b) => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      break;
+    }
+
+    let added = 0;
+    for (const c of Array.isArray(parsed.cases) ? parsed.cases : []) {
+      const input = String(c.input ?? "").trim();
+      const known_good = String(c.known_good ?? "").trim();
+      if (!input || !known_good) continue;
+      const key = input.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ input, known_good });
+      added++;
+      if (out.length >= want) break;
+    }
+    if (!added) break; // model stopped producing anything new
+  }
+
+  return out.slice(0, want);
+}
+
 // --- Vision path (images) --------------------------------------------------
 // Machine rules can't see pixels, so an image is always judged by the model
 // against the rubric's plain-English rule. The configured model MUST support

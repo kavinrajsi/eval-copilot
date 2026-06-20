@@ -190,6 +190,10 @@ function GoldenSet({ base, onChange }) {
   const [page, setPage] = useState(0);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
+  const [genCount, setGenCount] = useState(10);
+  const [genSeeds, setGenSeeds] = useState("");
+  const [genBusy, setGenBusy] = useState(false);
+  const [candidates, setCandidates] = useState([]); // { input, known_good, checked }
 
   const loadPage = useCallback(async () => {
     try {
@@ -293,6 +297,58 @@ function GoldenSet({ base, onChange }) {
     a.click();
   }
 
+  async function generate() {
+    setGenBusy(true);
+    try {
+      const b = await jsonFetch(`${base}/golden-cases/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ count: Number(genCount), seeds: genSeeds }),
+      });
+      const list = (b.candidates ?? []).map((c) => ({ ...c, checked: true }));
+      setCandidates(list);
+      if (!list.length) toast.message("No candidates generated.");
+    } catch (err) {
+      toast.error(`Generate failed: ${err.message}`);
+    } finally {
+      setGenBusy(false);
+    }
+  }
+
+  function patchCandidate(i, field, value) {
+    setCandidates((prev) => prev.map((c, j) => (j === i ? { ...c, [field]: value } : c)));
+  }
+
+  async function saveSelected() {
+    const keep = candidates
+      .filter((c) => c.checked && c.input.trim() && c.known_good.trim())
+      .map((c) => ({ input: c.input, known_good: c.known_good }));
+    if (!keep.length) {
+      toast.error("Nothing selected to save.");
+      return;
+    }
+    setGenBusy(true);
+    try {
+      let inserted = 0;
+      for (let k = 0; k < keep.length; k += 500) {
+        const r = await jsonFetch(`${base}/golden-cases`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cases: keep.slice(k, k + 500) }),
+        });
+        inserted += r.inserted ?? r.golden_cases?.length ?? 0;
+      }
+      toast.success(`Saved ${inserted} case${inserted === 1 ? "" : "s"}`);
+      setCandidates([]);
+      setPage(0);
+      await refresh();
+    } catch (err) {
+      toast.error(`Save failed: ${err.message}`);
+    } finally {
+      setGenBusy(false);
+    }
+  }
+
   const start = total ? page * GOLDEN_PAGE + 1 : 0;
   const end = Math.min(total, (page + 1) * GOLDEN_PAGE);
   const maxPage = Math.max(0, Math.ceil(total / GOLDEN_PAGE) - 1);
@@ -352,6 +408,87 @@ function GoldenSet({ base, onChange }) {
             {busy ? "Adding…" : "Add case"}
           </Button>
         </form>
+
+        <div className="grid gap-3 border-t pt-4">
+          <Label className="text-sm">Generate cases (AI draft)</Label>
+          <p className="text-muted-foreground text-xs">
+            The AI drafts candidates from this feature&apos;s Knowledge + rubric.{" "}
+            <strong>Review and edit before saving</strong> — an answer key the AI wrote and the
+            AI grades is a mirror, not a test.
+          </p>
+          <div className="flex flex-wrap items-end gap-2">
+            <Input
+              type="number"
+              min="1"
+              max="200"
+              value={genCount}
+              onChange={(e) => setGenCount(e.target.value)}
+              className="w-20"
+            />
+            <span className="text-muted-foreground text-xs">cases</span>
+            <Button type="button" variant="secondary" onClick={generate} disabled={genBusy}>
+              {genBusy ? "Generating…" : "Generate"}
+            </Button>
+          </div>
+          <Textarea
+            value={genSeeds}
+            onChange={(e) => setGenSeeds(e.target.value)}
+            placeholder="Optional seed examples to anchor style (one per line)…"
+            className="min-h-16 text-xs"
+          />
+
+          {candidates.length ? (
+            <div className="grid gap-2">
+              <p className="text-sm font-medium">
+                {candidates.filter((c) => c.checked).length}/{candidates.length} selected
+              </p>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-0">Keep</TableHead>
+                    <TableHead>Input</TableHead>
+                    <TableHead>Known-good</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {candidates.map((c, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="align-top">
+                        <input
+                          type="checkbox"
+                          checked={c.checked}
+                          onChange={(e) => patchCandidate(i, "checked", e.target.checked)}
+                        />
+                      </TableCell>
+                      <TableCell className="align-top">
+                        <Textarea
+                          value={c.input}
+                          onChange={(e) => patchCandidate(i, "input", e.target.value)}
+                          className="min-h-12 text-xs"
+                        />
+                      </TableCell>
+                      <TableCell className="align-top">
+                        <Textarea
+                          value={c.known_good}
+                          onChange={(e) => patchCandidate(i, "known_good", e.target.value)}
+                          className="min-h-12 text-xs"
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <div className="flex gap-2">
+                <Button type="button" onClick={saveSelected} disabled={genBusy}>
+                  {genBusy ? "Saving…" : "Save selected"}
+                </Button>
+                <Button type="button" variant="ghost" onClick={() => setCandidates([])}>
+                  Discard
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </div>
 
         {rows.length ? (
           <>

@@ -271,6 +271,27 @@ export async function judgeMultiByLLM(actual, knownGood, ruleText, knowledge, cr
   return judgeByLLM(actual, knownGood, ruleText, knowledge);
 }
 
+/**
+ * Synthetic golden-case generation. AI proposes candidates; the caller (and a
+ * human in the UI) decides what to save. No heuristic fallback — generation
+ * needs a real model.
+ *
+ * @returns {Promise<{candidates: Array<{input, known_good}>} | {error: string}>}
+ */
+export async function generateCases(count, knowledge, ruleText, rules, seeds) {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return { error: "Synthetic generation needs an AI provider (ANTHROPIC_API_KEY)." };
+  }
+  try {
+    const { generateCasesViaClaude } = await import("./grading-claude.js");
+    const candidates = await generateCasesViaClaude(count, knowledge, ruleText, rules, seeds);
+    return { candidates };
+  } catch (err) {
+    console.error("Case generation failed:", err?.message);
+    return { error: err?.message || "generation failed" };
+  }
+}
+
 // --- Text-similarity helpers (deterministic, no provider) ------------------
 
 function tokenize(s) {
